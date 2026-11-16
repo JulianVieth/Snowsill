@@ -11,6 +11,7 @@ final class OverlayController {
     private var activationObserver: NSObjectProtocol?
     private let tracker = WindowTracker()
     private var windowList: [WindowInfo] = []
+    private var windowListTimestamp: CFTimeInterval = 0
     /// Last active app other than SnowPile itself, so opening our menu doesn't shake snow off the active window.
     private var activePID: Int32?
     private let debug = ProcessInfo.processInfo.environment["SNOWPILE_DEBUG"] == "1"
@@ -42,8 +43,9 @@ final class OverlayController {
         }
 
         rebuild()
-        tracker.start { [weak self] windows in
+        tracker.start { [weak self] windows, timestamp in
             self?.windowList = windows
+            self?.windowListTimestamp = timestamp
             self?.applyWindows()
         }
     }
@@ -61,7 +63,7 @@ final class OverlayController {
     private func applyWindows() {
         let active = WindowFilter.activeWindow(in: windowList, activePID: activePID)
         let windows = active.map { [$0] } ?? []
-        for renderer in renderers { renderer.setWindows(windows) }
+        for renderer in renderers { renderer.setWindows(windows, timestamp: windowListTimestamp) }
     }
 
     private func tearDown() {

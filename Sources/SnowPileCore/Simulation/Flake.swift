@@ -13,6 +13,8 @@ public struct Flake: Sendable {
     public var opacity: CGFloat = 0
     /// Snow volume (pt²) the flake adds to a surface when it lands.
     public var snowVolume: CGFloat = 0
+    /// Snow falling off a window, as opposed to regular snowfall.
+    public var isPowder = false
     public var isActive = false
 
     public init() {}

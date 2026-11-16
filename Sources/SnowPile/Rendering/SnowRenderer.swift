@@ -32,8 +32,8 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var mesh = ContiguousArray<SurfaceVertex>()
     private var meshRanges: [SurfaceRange] = []
     private var meshGeneration = 0
-    /// (surface id, version) the current mesh was built from.
-    private var meshSources: [SIMD2<Int>] = []
+    /// (surface id, geometry version, version) the current mesh was built from.
+    private var meshSources: [SIMD3<Int>] = []
     private var lastMeshBuild: CFTimeInterval = -.infinity
     private var surfaceBuffers: [MTLBuffer] = []
     private var surfaceBufferGenerations: [Int]
@@ -163,10 +163,13 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
     private func rebuildMeshIfNeeded(now: CFTimeInterval) {
         let surfaces = simulation.surfaces
-        let layoutChanged = meshSources.count != surfaces.count
-            || surfaces.indices.contains { surfaces[$0].id != meshSources[$0].x }
+        // Moved or new surfaces are rebuilt right away so the snow sticks to a dragged window;
+        // snow piling up only needs the 20 Hz rate.
+        let layoutChanged = meshSources.count != surfaces.count || surfaces.indices.contains {
+            surfaces[$0].id != meshSources[$0].x || surfaces[$0].geometryVersion != meshSources[$0].y
+        }
         guard layoutChanged || now - lastMeshBuild >= Self.meshRebuildInterval else { return }
-        guard layoutChanged || surfaces.indices.contains(where: { surfaces[$0].version != meshSources[$0].y }) else { return }
+        guard layoutChanged || surfaces.indices.contains(where: { surfaces[$0].version != meshSources[$0].z }) else { return }
         lastMeshBuild = now
 
         let debugVertices = debug ? 2 : 0
@@ -197,7 +200,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
                     offset += 2
                 }
                 meshRanges.append(range)
-                meshSources.append(SIMD2(surface.id, surface.version))
+                meshSources.append(SIMD3(surface.id, surface.geometryVersion, surface.version))
             }
         }
         meshGeneration &+= 1
@@ -223,8 +226,8 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         return buffer
     }
 
-    func setWindows(_ windows: [WindowInfo]) {
-        simulation.setWindows(windows)
+    func setWindows(_ windows: [WindowInfo], timestamp: CFTimeInterval) {
+        simulation.setWindows(windows, timestamp: timestamp)
     }
 
     private func updateDebugLabel(dt: CFTimeInterval) {

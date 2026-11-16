@@ -22,7 +22,7 @@ import Testing
         for _ in 0..<100 {
             sim.step(dt: 1.0 / 60)
             #expect(sim.activeCount <= 50)
-            #expect(sim.flakes.count == 50)
+            #expect(sim.flakes.count == 50 + SnowConfig().powderCapacity)
         }
         #expect(sim.activeCount == sim.flakes.lazy.filter(\.isActive).count)
     }
@@ -31,7 +31,7 @@ import Testing
         var config = SnowConfig()
         config.maxFlakes = 100_000
         let sim = SnowSimulation(config: config, bounds: screen, seed: 3)
-        #expect(sim.flakes.count == SnowSimulation.hardFlakeLimit)
+        #expect(sim.flakes.count == SnowSimulation.hardFlakeLimit + SnowConfig().powderCapacity)
     }
 
     @Test func flakesFallDownward() {
@@ -56,7 +56,7 @@ import Testing
             }
         }
         #expect(sim.activeCount > 0)
-        #expect(sim.flakes.count == 20)
+        #expect(sim.flakes.count == 20 + SnowConfig().powderCapacity)
     }
 
     @Test func resetClearsAllFlakes() {

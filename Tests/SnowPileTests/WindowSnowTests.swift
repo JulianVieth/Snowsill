@@ -5,39 +5,57 @@ import Testing
 @Suite struct WindowSnowTests {
     let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
     let window = WindowInfo(number: 42, ownerPID: 10, bounds: CGRect(x: 100, y: 200, width: 400, height: 300))
+    let inset = SnowConfig().windowCornerInset
 
-    func config(spawnRate: Double = 40, maxFlakes: Int = 2500) -> SnowConfig {
+    func config(spawnRate: Double = 0) -> SnowConfig {
         var config = SnowConfig()
         config.spawnRate = spawnRate
-        config.maxFlakes = maxFlakes
         return config
+    }
+
+    /// Simulation with one window carrying `volume` of snow spread evenly over its top edge.
+    func simWithSnow(_ volume: CGFloat = 3000, seed: UInt64 = 1) -> SnowSimulation {
+        var sim = SnowSimulation(config: config(), bounds: screen, seed: seed)
+        sim.setWindows([window], timestamp: 0)
+        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: volume, minX: 0, maxX: 1000) }
+        return sim
     }
 
     func windowSurface(_ sim: SnowSimulation, _ number: Int = 42) -> Surface? {
         sim.surfaces.first { $0.kind == .window(number: number) }
     }
 
-    func activeIndices(_ sim: SnowSimulation) -> Set<Int> {
-        Set(sim.flakes.indices.filter { sim.flakes[$0].isActive })
+    func airborneVolume(_ sim: SnowSimulation) -> CGFloat {
+        sim.flakes.filter(\.isActive).reduce(0) { $0 + $1.snowVolume }
     }
+
+    func moved(dx: CGFloat = 0, dy: CGFloat = 0, dw: CGFloat = 0) -> WindowInfo {
+        var w = window
+        w.bounds.origin.x += dx
+        w.bounds.origin.y += dy
+        w.bounds.size.width += dw
+        return w
+    }
+
+    // MARK: - Geometry
 
     @Test func surfaceSitsOnTopEdgeInsetFromCorners() throws {
         var sim = SnowSimulation(config: config(), bounds: screen, seed: 1)
-        sim.setWindows([window])
+        sim.setWindows([window], timestamp: 0)
         let surface = try #require(windowSurface(sim))
         #expect(surface.baseY == 200)
-        #expect(surface.minX == 100 + SnowConfig().windowCornerInset)
-        #expect(surface.maxX == 500 - SnowConfig().windowCornerInset)
+        #expect(surface.minX == 100 + inset)
+        #expect(surface.maxX == 500 - inset)
         #expect(surface.maxHeight == SnowConfig().windowMaxHeight)
         #expect(surface.edges == .spill)
     }
 
     @Test func surfaceIsClippedToScreen() throws {
         var sim = SnowSimulation(config: config(), bounds: screen, seed: 2)
-        sim.setWindows([WindowInfo(number: 1, ownerPID: 10, bounds: CGRect(x: -100, y: 200, width: 400, height: 300))])
+        sim.setWindows([WindowInfo(number: 1, ownerPID: 10, bounds: CGRect(x: -100, y: 200, width: 400, height: 300))], timestamp: 0)
         let surface = try #require(windowSurface(sim, 1))
         #expect(surface.minX == 0)
-        #expect(surface.maxX == 300 - SnowConfig().windowCornerInset)
+        #expect(surface.maxX == 300 - inset)
     }
 
     @Test func windowsWithTopEdgeOffScreenGetNoSurface() {
@@ -46,13 +64,13 @@ import Testing
             WindowInfo(number: 1, ownerPID: 10, bounds: CGRect(x: 100, y: -10, width: 400, height: 300)),
             WindowInfo(number: 2, ownerPID: 10, bounds: CGRect(x: 100, y: 900, width: 400, height: 300)),
             WindowInfo(number: 3, ownerPID: 10, bounds: CGRect(x: 1200, y: 100, width: 400, height: 300)),
-        ])
+        ], timestamp: 0)
         #expect(sim.surfaces.allSatisfy { if case .ground = $0.kind { true } else { false } })
     }
 
     @Test func snowLandsOnWindow() throws {
-        var sim = SnowSimulation(config: config(), bounds: screen, seed: 4)
-        sim.setWindows([window])
+        var sim = SnowSimulation(config: config(spawnRate: 40), bounds: screen, seed: 4)
+        sim.setWindows([window], timestamp: 0)
         for _ in 0..<(60 * 20) { sim.step(dt: 1.0 / 60) }
         let surface = try #require(windowSurface(sim))
         #expect(surface.totalVolume > 0)
@@ -60,91 +78,170 @@ import Testing
     }
 
     @Test func unchangedOrJitteringWindowKeepsSnow() throws {
-        var sim = SnowSimulation(config: config(), bounds: screen, seed: 5)
-        sim.setWindows([window])
-        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 500, minX: 200, maxX: 300) }
-        sim.setWindows([window])
-        var jittered = window
-        jittered.bounds.origin.x += 0.3
-        sim.setWindows([jittered])
-        #expect(try #require(windowSurface(sim)).totalVolume == 500)
+        var sim = simWithSnow()
+        let before = try #require(windowSurface(sim))
+        sim.setWindows([window], timestamp: 0.1)
+        sim.setWindows([moved(dx: 0.3)], timestamp: 0.2)
+        let after = try #require(windowSurface(sim))
+        #expect(after.heights == before.heights)
+        #expect(after.minX == before.minX)
     }
 
-    @Test func movingWindowTurnsAllSnowIntoFlakes() throws {
-        var sim = SnowSimulation(config: config(spawnRate: 0), bounds: screen, seed: 6)
-        sim.setWindows([window])
-        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 3000, minX: 112, maxX: 488) }
-        let before = activeIndices(sim)
+    // MARK: - Moving
 
-        var moved = window
-        moved.bounds.origin.y += 30
-        sim.setWindows([moved])
-
-        let surface = try #require(windowSurface(sim))
-        #expect(surface.baseY == 230)
-        #expect(surface.totalVolume == 0)
-        let clumps = activeIndices(sim).subtracting(before)
-        #expect(!clumps.isEmpty)
-        let volume = clumps.reduce(CGFloat(0)) { $0 + sim.flakes[$1].snowVolume }
-        #expect(abs(volume - 3000) < 1e-6)
-        for i in clumps {
-            let p = sim.flakes[i].position
-            #expect(p.x >= 100 && p.x <= 500)
-            #expect(p.y >= 200 - SnowConfig().windowMaxHeight - 1 && p.y <= 200)
-        }
-    }
-
-    @Test func closingWindowTurnsSnowIntoFlakes() {
-        var sim = SnowSimulation(config: config(spawnRate: 0), bounds: screen, seed: 7)
-        sim.setWindows([window])
-        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 800, minX: 112, maxX: 488) }
-        sim.setWindows([])
-        #expect(windowSurface(sim) == nil)
-        let volume = sim.flakes.filter(\.isActive).reduce(CGFloat(0)) { $0 + $1.snowVolume }
-        #expect(abs(volume - 800) < 1e-6)
-    }
-
-    @Test func shakenSnowFallsDownEventually() {
-        var sim = SnowSimulation(config: config(spawnRate: 0), bounds: screen, seed: 8)
-        sim.setWindows([window])
-        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 800, minX: 112, maxX: 488) }
-        sim.setWindows([])
-        for _ in 0..<(60 * 20) { sim.step(dt: 1.0 / 60) }
+    @Test func slowMoveCarriesSnowAlong() throws {
+        var sim = simWithSnow()
+        let before = try #require(windowSurface(sim))
+        // 50 pt right and 30 pt down within 0.25 s: 200 pt/s, well below the slip speed.
+        sim.setWindows([moved(dx: 50, dy: 30)], timestamp: 0.25)
+        let after = try #require(windowSurface(sim))
+        #expect(after.id == before.id)
+        #expect(after.minX == before.minX + 50)
+        #expect(after.baseY == 230)
+        #expect(after.heights == before.heights)
         #expect(sim.activeCount == 0)
-        // Everything ended up on the ground (walls keep it there).
+    }
+
+    @Test func fastHorizontalMoveThrowsSnowOffTheTrailingEdge() throws {
+        var sim = simWithSnow()
+        let volume = try #require(windowSurface(sim)).totalVolume
+        // 100 pt to the right within one frame: 6000 pt/s.
+        sim.setWindows([moved(dx: 100)], timestamp: 1.0 / 60)
+        let after = try #require(windowSurface(sim))
+        #expect(after.totalVolume < volume)
+        // The window slid right under the lagging snow: it fell off the trailing (left) edge,
+        // and the leading (right) end is bare.
+        #expect(after.heights.first! > 0)
+        #expect(after.heights.last == 0)
+        #expect(sim.activeCount > 0)
+        for flake in sim.flakes where flake.isActive {
+            #expect(flake.position.x <= after.minX + 2)
+        }
+        #expect(abs(after.totalVolume + airborneVolume(sim) - volume) < 1e-6)
+    }
+
+    @Test func fastVerticalMoveKeepsSnow() throws {
+        var sim = simWithSnow()
+        let volume = try #require(windowSurface(sim)).totalVolume
+        sim.setWindows([moved(dy: 100)], timestamp: 1.0 / 60)
+        #expect(try #require(windowSurface(sim)).totalVolume == volume)
+        #expect(sim.activeCount == 0)
+    }
+
+    @Test func movingAcrossTheScreenEdgeDropsSnowThere() throws {
+        var sim = simWithSnow()
+        let volume = try #require(windowSurface(sim)).totalVolume
+        // Slowly to the left until the window sticks out 100 pt past the screen edge.
+        sim.setWindows([moved(dx: -200)], timestamp: 1)
+        let after = try #require(windowSurface(sim))
+        #expect(after.minX == 0)
+        #expect(after.totalVolume < volume)
+        #expect(abs(after.totalVolume + airborneVolume(sim) - volume) < 1e-6)
+    }
+
+    // MARK: - Resizing
+
+    @Test func growingFromTheRightKeepsSnowInPlace() throws {
+        var sim = simWithSnow()
+        let before = try #require(windowSurface(sim))
+        sim.setWindows([moved(dw: 100)], timestamp: 0.1)
+        let after = try #require(windowSurface(sim))
+        #expect(after.minX == before.minX)
+        #expect(Array(after.heights.prefix(before.heights.count)) == Array(before.heights))
+        #expect(after.heights.last == 0)
+    }
+
+    @Test func shrinkingFromTheRightDropsTheCutOffSnow() throws {
+        var sim = simWithSnow()
+        let volume = try #require(windowSurface(sim)).totalVolume
+        sim.setWindows([moved(dw: -100)], timestamp: 0.1)
+        let after = try #require(windowSurface(sim))
+        #expect(after.maxX == 400 - inset)
+        #expect(abs(after.totalVolume + airborneVolume(sim) - volume) < 1e-6)
+        #expect(sim.activeCount > 0)
+    }
+
+    @Test func growingFromTheLeftKeepsSnowAtItsAbsolutePosition() throws {
+        var sim = simWithSnow()
+        let before = try #require(windowSurface(sim))
+        sim.setWindows([moved(dx: -100, dw: 100)], timestamp: 0.1)
+        let after = try #require(windowSurface(sim))
+        #expect(after.minX == before.minX - 100)
+        let x: CGFloat = 300
+        #expect(after.heights[after.column(at: x)!] == before.heights[before.column(at: x)!])
+        #expect(after.heights.first == 0)
+        #expect(sim.activeCount == 0)
+    }
+
+    // MARK: - Powder
+
+    @Test func closingWindowTurnsSnowIntoPowder() {
+        var sim = simWithSnow(3000)
+        sim.setWindows([], timestamp: 0.1)
+        #expect(windowSurface(sim) == nil)
+        #expect(abs(airborneVolume(sim) - 3000) < 1e-6)
+        let powder = sim.flakes.filter(\.isActive)
+        #expect(powder.count > 100)
+        #expect(powder.allSatisfy { $0.radius <= SnowConfig().powderRadiusRange.upperBound })
+    }
+
+    @Test func fullWindowFitsIntoThePowderPool() {
+        // The fullest possible window: 376 pt × 14 pt.
+        var sim = simWithSnow(376 * 14)
+        sim.setWindows([], timestamp: 0.1)
+        #expect(abs(airborneVolume(sim) - 376 * 14) < 1e-6)
+    }
+
+    @Test func powderFallsDownAndEndsUpOnTheGround() {
+        var sim = simWithSnow(800)
+        sim.setWindows([], timestamp: 0.1)
+        for _ in 0..<(60 * 30) { sim.step(dt: 1.0 / 60) }
+        #expect(sim.activeCount == 0)
         #expect(abs(sim.surfaces[0].totalVolume - 800) < 1e-6)
     }
 
-    @Test func snowSlidingOffAnEdgeBecomesFlakes() {
-        var sim = SnowSimulation(config: config(spawnRate: 0), bounds: screen, seed: 9)
-        sim.setWindows([window])
+    @Test func snowSlidingOffAnEdgeBecomesPowder() throws {
+        var sim = SnowSimulation(config: config(), bounds: screen, seed: 9)
+        sim.setWindows([window], timestamp: 0)
         sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 200, minX: 112, maxX: 132) }
         for _ in 0..<30 { sim.step(dt: 1.0 / 60) }
 
-        let surface = windowSurface(sim)!
+        let surface = try #require(windowSurface(sim))
         let airborne = sim.flakes.filter(\.isActive)
         #expect(!airborne.isEmpty)
         #expect(airborne.allSatisfy { $0.position.x < surface.minX })
-        let inAir = airborne.reduce(CGFloat(0)) { $0 + $1.snowVolume }
-        // Not yet converted spill is held back as credit, at most one flake's worth.
-        let total = surface.totalVolume + inAir
+        #expect(airborne.allSatisfy { $0.radius <= SnowConfig().powderRadiusRange.upperBound })
+        let total = surface.totalVolume + airborneVolume(sim)
         #expect(total <= 200 + 1e-6)
-        #expect(total > 200 - SnowSimulation.flakeVolume(radius: SnowConfig().radiusRange.upperBound, config: SnowConfig()))
+        #expect(total > 200 - SnowConfig().powderVolume)
     }
 
-    @Test func regularSnowfallLeavesReserveForShakenSnow() {
-        var sim = SnowSimulation(config: config(spawnRate: 100_000, maxFlakes: 100), bounds: screen, seed: 10)
+    @Test func regularSnowfallNeverUsesThePowderPool() {
+        var config = config(spawnRate: 100_000)
+        config.maxFlakes = 100
+        var sim = SnowSimulation(config: config, bounds: screen, seed: 10)
         for _ in 0..<60 {
             sim.step(dt: 1.0 / 60)
-            #expect(sim.activeCount <= 75)
+            #expect(sim.activeCount <= 100)
         }
-        #expect(sim.activeCount == 75)
+        #expect(sim.activeCount == 100)
+        #expect(sim.flakes.count == 100 + SnowConfig().powderCapacity)
+    }
+
+    @Test func powderDoesNotStopRegularSnowfall() {
+        var config = config(spawnRate: 100_000)
+        config.maxFlakes = 100
+        var sim = SnowSimulation(config: config, bounds: screen, seed: 12)
+        sim.setWindows([window], timestamp: 0)
+        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 3000, minX: 0, maxX: 1000) }
+        sim.setWindows([], timestamp: 0.1)
+        sim.step(dt: 1.0 / 60)
+        #expect(sim.snowfallCount == 100)
+        #expect(sim.activeCount > 100)
     }
 
     @Test func resetClearsWindowSnow() throws {
-        var sim = SnowSimulation(config: config(), bounds: screen, seed: 11)
-        sim.setWindows([window])
-        sim.modifySurface(.window(number: 42)) { $0.deposit(volume: 500, minX: 200, maxX: 300) }
+        var sim = simWithSnow()
         sim.reset()
         #expect(try #require(windowSurface(sim)).totalVolume == 0)
         #expect(sim.activeCount == 0)

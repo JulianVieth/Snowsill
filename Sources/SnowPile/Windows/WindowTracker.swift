@@ -1,35 +1,69 @@
 import CoreGraphics
 import Foundation
+import QuartzCore
 import SnowPileCore
 
 /// Polls the window list on a background queue and hands changed lists to the main actor as immutable snapshots.
+/// Polls at 12 Hz while nothing moves and at 60 Hz right after a change, so snow keeps up with a dragged window.
 final class WindowTracker: @unchecked Sendable {
-    // `last` is only touched on `queue`; `timer` only on the main actor.
+    typealias Handler = @MainActor @Sendable (_ windows: [WindowInfo], _ timestamp: CFTimeInterval) -> Void
+
+    private static let idleInterval: TimeInterval = 1.0 / 12
+    private static let activeInterval: TimeInterval = 1.0 / 60
+    /// How long to stay at the fast rate after the last change.
+    private static let activeDuration: CFTimeInterval = 0.5
+
+    // All state below is only touched on `queue`.
     private let queue = DispatchQueue(label: "SnowPile.WindowTracker", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
     private var last: [WindowInfo]?
+    private var lastChange: CFTimeInterval = -.infinity
+    private var isFast = false
     private let ownPID = getpid()
 
-    func start(interval: TimeInterval = 1.0 / 12, onChange: @escaping @MainActor @Sendable ([WindowInfo]) -> Void) {
-        stop()
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(10))
-        timer.setEventHandler { [weak self] in self?.poll(onChange) }
-        timer.resume()
-        self.timer = timer
+    func start(onChange: @escaping Handler) {
+        queue.async { [self] in
+            stopOnQueue()
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.setEventHandler { [weak self] in self?.poll(onChange) }
+            self.timer = timer
+            isFast = false
+            schedule(Self.idleInterval, startNow: true)
+            timer.resume()
+        }
     }
 
     func stop() {
-        timer?.cancel()
-        timer = nil
+        queue.sync { stopOnQueue() }
     }
 
-    private func poll(_ onChange: @escaping @MainActor @Sendable ([WindowInfo]) -> Void) {
+    private func stopOnQueue() {
+        timer?.cancel()
+        timer = nil
+        last = nil
+    }
+
+    private func schedule(_ interval: TimeInterval, startNow: Bool = false) {
+        timer?.schedule(deadline: startNow ? .now() : .now() + interval, repeating: interval, leeway: .milliseconds(2))
+    }
+
+    private func poll(_ onChange: @escaping Handler) {
+        let now = CACurrentMediaTime()
         guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] else { return }
         let windows = WindowFilter.parse(raw, ownPID: ownPID)
-        guard windows != last else { return }
-        last = windows
-        Task { @MainActor in onChange(windows) }
+
+        if windows != last {
+            last = windows
+            lastChange = now
+            Task { @MainActor in onChange(windows, now) }
+            if !isFast {
+                isFast = true
+                schedule(Self.activeInterval)
+            }
+        } else if isFast, now - lastChange > Self.activeDuration {
+            isFast = false
+            schedule(Self.idleInterval)
+        }
     }
 }

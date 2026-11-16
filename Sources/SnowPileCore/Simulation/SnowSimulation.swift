@@ -13,12 +13,16 @@ public struct SnowConfig: Sendable {
     public var windowCornerInset: CGFloat = 12
     /// Share of a flake's disc area that ends up as lying snow. Tuned so the ground fills in about five minutes.
     public var volumeScale: CGFloat = 0.25
-    /// Share of the pool regular snowfall must leave free, so snow shaken off a window can always fall.
-    public var reservedFlakeShare: Double = 0.25
-    /// Shaken-off snow falls as clumps: bigger, and carrying more volume than their disc suggests,
-    /// otherwise a full window would need thousands of flakes.
-    public var clumpRadiusRange: ClosedRange<CGFloat> = 2.5...5
-    public var clumpVolumeFactor: CGFloat = 4
+    /// Extra pool slots for powder (snow falling off windows), on top of `maxFlakes`.
+    /// Enough for a completely full window to turn into powder at once.
+    public var powderCapacity = 1200
+    public var powderRadiusRange: ClosedRange<CGFloat> = 0.6...1.3
+    /// Volume each powder particle carries. Raised automatically when the pool would not suffice.
+    public var powderVolume: CGFloat = 5
+    /// Horizontal window speed (pt/s) above which the snow can no longer keep up and starts sliding off.
+    public var slipSpeed: CGFloat = 900
+    /// Share of the movement beyond `slipSpeed` that the snow lags behind.
+    public var slipFactor: CGFloat = 0.6
 
     public init() {}
 }
@@ -53,15 +57,25 @@ public struct SnowSimulation {
     public var bounds: CGRect
     public private(set) var flakes: ContiguousArray<Flake>
     public private(set) var activeCount = 0
+    /// Active flakes of regular snowfall, limited to `config.maxFlakes`. Powder comes on top.
+    public private(set) var snowfallCount = 0
     /// Ground first, then window surfaces in front-to-back order.
     public private(set) var surfaces: ContiguousArray<Surface> = []
 
     private var freeSlots: ContiguousArray<Int>
     private var spawnAccumulator: Double = 0
     private var rng: SplitMix64
-    private var windowBounds: [Int: CGRect] = [:]
+    private struct TrackedWindow {
+        /// Bounds the surface was last laid out for. Jitter below `moveTolerance` doesn't update them,
+        /// so slow drifts still add up to a move.
+        var bounds: CGRect
+        var timestamp: Double
+        /// Sub-column part of the snow's offset that column-wise relocation couldn't apply yet.
+        var columnResidual: CGFloat
+    }
+
+    private var tracked: [Int: TrackedWindow] = [:]
     private var nextSurfaceID = 1
-    private let regularFlakeLimit: Int
 
     public init(config: SnowConfig = SnowConfig(), bounds: CGRect, seed: UInt64 = UInt64.random(in: .min ... .max)) {
         var config = config
@@ -69,9 +83,10 @@ public struct SnowSimulation {
         self.config = config
         self.bounds = bounds
         self.rng = SplitMix64(seed: seed)
-        flakes = ContiguousArray(repeating: Flake(), count: config.maxFlakes)
-        freeSlots = ContiguousArray((0..<config.maxFlakes).reversed())
-        regularFlakeLimit = config.maxFlakes - Int(Double(config.maxFlakes) * config.reservedFlakeShare)
+        config.powderCapacity = max(config.powderCapacity, 0)
+        let capacity = config.maxFlakes + config.powderCapacity
+        flakes = ContiguousArray(repeating: Flake(), count: capacity)
+        freeSlots = ContiguousArray((0..<capacity).reversed())
         if config.groundEnabled {
             surfaces.append(makeSurface(
                 kind: .ground(screen: 0), minX: bounds.minX, baseY: bounds.maxY,
@@ -115,6 +130,7 @@ public struct SnowSimulation {
                 flake.isActive = false
                 freeSlots.append(i)
                 activeCount -= 1
+                if !flake.isPowder { snowfallCount -= 1 }
             }
             flakes[i] = flake
         }
@@ -146,36 +162,47 @@ public struct SnowSimulation {
 
     // MARK: - Windows
 
-    /// Updates window surfaces from a front-to-back window list (CG coordinates).
-    /// Snow on windows that moved, resized or disappeared falls off as flakes.
-    public mutating func setWindows(_ windows: [WindowInfo]) {
-        var newBounds: [Int: CGRect] = [:]
-        for window in windows { newBounds[window.number] = window.bounds }
-
-        var kept: [Int: Surface] = [:]
+    /// Updates window surfaces from a front-to-back window list (CG coordinates) captured at `timestamp` (seconds).
+    /// Snow moves along with its window. It only falls off, as powder, where it slides past an edge: when the
+    /// window is dragged sideways fast, shrunk, pushed past the screen edge, or closed.
+    public mutating func setWindows(_ windows: [WindowInfo], timestamp: Double) {
+        var existing: [Int: Surface] = [:]
+        var updated = ContiguousArray<Surface>()
         for surface in surfaces {
-            guard case .window(let number) = surface.kind else { continue }
-            if let bounds = newBounds[number], let old = windowBounds[number], Self.isSame(bounds, old) {
-                kept[number] = surface
-            } else {
-                shakeOff(surface)
-            }
+            if case .window(let number) = surface.kind { existing[number] = surface } else { updated.append(surface) }
         }
 
-        var updated = ContiguousArray(surfaces.filter { if case .ground = $0.kind { true } else { false } })
-        var updatedBounds: [Int: CGRect] = [:]
+        var newTracked: [Int: TrackedWindow] = [:]
         for window in windows {
-            if let surface = kept[window.number] {
-                updated.append(surface)
-                // Keep the original bounds so slow drifts below the tolerance still add up to a move.
-                updatedBounds[window.number] = windowBounds[window.number]
-            } else {
-                updatedBounds[window.number] = window.bounds
-                if let surface = makeWindowSurface(window) { updated.append(surface) }
+            let previous = tracked[window.number]
+            let surface = existing.removeValue(forKey: window.number)
+
+            if let previous, Self.isSame(window.bounds, previous.bounds) {
+                newTracked[window.number] = previous
+                if let surface { updated.append(surface) }
+                continue
             }
+
+            var residual: CGFloat = 0
+            let geometry = windowSurfaceGeometry(window.bounds)
+            if var surface, let previous, let geometry {
+                residual = relocate(&surface, from: previous, to: window.bounds, geometry: geometry, timestamp: timestamp)
+                updated.append(surface)
+            } else {
+                if let surface { powderize(surface) }
+                if let geometry {
+                    updated.append(makeSurface(
+                        kind: .window(number: window.number), minX: geometry.minX, baseY: geometry.baseY,
+                        width: geometry.width, maxHeight: config.windowMaxHeight, edges: .spill
+                    ))
+                }
+            }
+            newTracked[window.number] = TrackedWindow(bounds: window.bounds, timestamp: timestamp, columnResidual: residual)
         }
+
+        for surface in existing.values { powderize(surface) }
         surfaces = updated
-        windowBounds = updatedBounds
+        tracked = newTracked
     }
 
     private static func isSame(_ a: CGRect, _ b: CGRect) -> Bool {
@@ -183,16 +210,53 @@ public struct SnowSimulation {
             && abs(a.width - b.width) <= moveTolerance && abs(a.height - b.height) <= moveTolerance
     }
 
-    private mutating func makeWindowSurface(_ window: WindowInfo) -> Surface? {
-        let top = window.bounds.minY
+    /// Top edge of a window, inset from its rounded corners and clipped to the screen. Nil if not on screen.
+    private func windowSurfaceGeometry(_ window: CGRect) -> (minX: CGFloat, baseY: CGFloat, width: CGFloat)? {
+        let top = window.minY
         guard top >= bounds.minY, top < bounds.maxY else { return nil }
-        let minX = max(window.bounds.minX + config.windowCornerInset, bounds.minX)
-        let maxX = min(window.bounds.maxX - config.windowCornerInset, bounds.maxX)
+        let minX = max(window.minX + config.windowCornerInset, bounds.minX)
+        let maxX = min(window.maxX - config.windowCornerInset, bounds.maxX)
         guard maxX - minX >= 2 * Surface.columnWidth else { return nil }
-        return makeSurface(
-            kind: .window(number: window.number), minX: minX, baseY: top,
-            width: maxX - minX, maxHeight: config.windowMaxHeight, edges: .spill
-        )
+        return (minX, top, maxX - minX)
+    }
+
+    /// Moves the surface with its window and lets whatever no longer fits fall off as powder.
+    /// Returns the new sub-column residual.
+    private mutating func relocate(
+        _ surface: inout Surface, from previous: TrackedWindow, to window: CGRect,
+        geometry: (minX: CGFloat, baseY: CGFloat, width: CGFloat), timestamp: Double
+    ) -> CGFloat {
+        let dMinX = window.minX - previous.bounds.minX
+        let dMaxX = window.maxX - previous.bounds.maxX
+        let resized = abs(window.width - previous.bounds.width) > Self.moveTolerance
+
+        // Moving carries the snow along. Dragging an edge keeps it where it lies, so it doesn't slide along the edge.
+        var shift = resized && abs(dMaxX) <= Self.moveTolerance ? 0 : dMinX
+        if resized && abs(dMinX) <= Self.moveTolerance { shift = 0 }
+
+        let dt = max(timestamp - previous.timestamp, 1.0 / 240)
+        let velocityX = resized ? 0 : dMinX / CGFloat(dt)
+        let speed = abs(velocityX)
+        if speed > config.slipSpeed {
+            // Inertia: beyond the slip speed the snow lags behind and slides toward the trailing edge.
+            let slip = abs(dMinX) * (speed - config.slipSpeed) / speed * config.slipFactor
+            shift -= velocityX > 0 ? slip : -slip
+        }
+
+        let exact = (geometry.minX - surface.minX - shift) / Surface.columnWidth + previous.columnResidual
+        let offset = Int(exact.rounded())
+        let lost = surface.relocate(minX: geometry.minX, baseY: geometry.baseY, width: geometry.width, columnOffset: offset)
+
+        let depth = config.windowMaxHeight * 0.6
+        let y = (geometry.baseY - depth)...geometry.baseY
+        if lost.left > 0 {
+            spawnPowder(volume: lost.left, x: (geometry.minX - 4)...geometry.minX, y: y, inheritedVX: velocityX, outward: -1)
+        }
+        if lost.right > 0 {
+            let maxX = surface.maxX
+            spawnPowder(volume: lost.right, x: maxX...(maxX + 4), y: y, inheritedVX: velocityX, outward: 1)
+        }
+        return exact - CGFloat(offset)
     }
 
     private mutating func makeSurface(
@@ -202,75 +266,89 @@ public struct SnowSimulation {
         return Surface(kind: kind, minX: minX, baseY: baseY, width: width, maxHeight: maxHeight, edges: edges, id: nextSurfaceID)
     }
 
-    /// Turns all snow of a surface into falling clumps with a small random impulse.
-    private mutating func shakeOff(_ surface: Surface) {
+    // MARK: - Powder
+
+    /// Volume per particle so that `volume` fits into the free slots.
+    private func powderParticleVolume(for volume: CGFloat) -> CGFloat {
+        max(config.powderVolume, volume / CGFloat(max(freeSlots.count, 1)))
+    }
+
+    /// Turns all snow of a surface into powder, shaped like the layer it came from.
+    private mutating func powderize(_ surface: Surface) {
+        let perParticle = powderParticleVolume(for: surface.totalVolume)
         var credit: CGFloat = 0
-        var target = clumpVolume(radius: randomClumpRadius())
         var lastColumn = 0
         for column in surface.heights.indices where surface.heights[column] > 0 {
             lastColumn = column
             credit += surface.heights[column] * Surface.columnWidth
-            while credit >= target {
-                guard spawnClump(from: surface, column: column, volume: target) else { return }
-                credit -= target
-                target = clumpVolume(radius: randomClumpRadius())
+            while credit >= perParticle {
+                guard spawnPowderParticle(from: surface, column: column, volume: perParticle) else { return }
+                credit -= perParticle
             }
         }
-        if credit > 0 { spawnClump(from: surface, column: lastColumn, volume: credit) }
-    }
-
-    private func clumpVolume(radius: CGFloat) -> CGFloat {
-        Self.flakeVolume(radius: radius, config: config) * config.clumpVolumeFactor
-    }
-
-    private mutating func randomClumpRadius() -> CGFloat {
-        CGFloat.random(in: config.clumpRadiusRange, using: &rng)
+        if credit > 1e-9 { spawnPowderParticle(from: surface, column: lastColumn, volume: credit) }
     }
 
     @discardableResult
-    private mutating func spawnClump(from surface: Surface, column: Int, volume: CGFloat) -> Bool {
+    private mutating func spawnPowderParticle(from surface: Surface, column: Int, volume: CGFloat) -> Bool {
         let height = surface.heights[column]
-        let radius = max(sqrt(volume / (.pi * config.volumeScale * config.clumpVolumeFactor)), config.radiusRange.lowerBound)
         let x = surface.minX + (CGFloat(column) + 0.5) * Surface.columnWidth + CGFloat.random(in: -1...1, using: &rng)
         let y = surface.topY(atColumn: column) + CGFloat.random(in: 0...height, using: &rng)
+        return spawnPowder(at: CGPoint(x: x, y: y), volume: volume, inheritedVX: 0, outward: 0)
+    }
+
+    /// Spawns powder carrying exactly `volume` (as long as the pool has room), spread over the given area.
+    private mutating func spawnPowder(
+        volume: CGFloat, x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>, inheritedVX: CGFloat, outward: CGFloat
+    ) {
+        let perParticle = powderParticleVolume(for: volume)
+        var remaining = volume
+        while remaining > 1e-9 {
+            let particle = min(perParticle, remaining)
+            let position = CGPoint(x: CGFloat.random(in: x, using: &rng), y: CGFloat.random(in: y, using: &rng))
+            guard spawnPowder(at: position, volume: particle, inheritedVX: inheritedVX, outward: outward) else { return }
+            remaining -= particle
+        }
+    }
+
+    /// `outward` is -1 or 1 for powder sliding off an edge, 0 for powder from a whole layer.
+    @discardableResult
+    private mutating func spawnPowder(at position: CGPoint, volume: CGFloat, inheritedVX: CGFloat, outward: CGFloat) -> Bool {
+        let radius = CGFloat.random(in: config.powderRadiusRange, using: &rng)
+        let velocity = CGVector(
+            dx: inheritedVX * 0.15 + outward * CGFloat.random(in: 5...15, using: &rng) + CGFloat.random(in: -8...8, using: &rng),
+            dy: CGFloat.random(in: -6...6, using: &rng)
+        )
         return spawn(
-            at: CGPoint(x: x, y: y), radius: radius, snowVolume: volume,
-            velocity: CGVector(dx: CGFloat.random(in: -25...25, using: &rng), dy: CGFloat.random(in: -15...25, using: &rng)),
-            driftX: CGFloat.random(in: -4...4, using: &rng),
-            swayAmplitude: CGFloat.random(in: 2...6, using: &rng), opacity: 1
+            at: position, radius: radius, snowVolume: volume, velocity: velocity,
+            driftX: outward * 2 + CGFloat.random(in: -3...3, using: &rng),
+            swayAmplitude: outward == 0 ? CGFloat.random(in: 4...12, using: &rng) : CGFloat.random(in: 1...2, using: &rng),
+            opacity: CGFloat.random(in: 0.35...0.8, using: &rng),
+            isPowder: true
         )
     }
 
-    /// Turns snow that slid past a window edge into flakes falling outward.
+    /// Turns snow that slid past a window edge into powder falling outward.
     /// `side` is -1 for the left edge, 1 for the right edge.
     private mutating func releaseSpill(of index: Int, side: CGFloat) {
-        let maxCredit = 10 * Self.flakeVolume(radius: config.radiusRange.upperBound, config: config)
         var credit = side < 0 ? surfaces[index].spillCredit.left : surfaces[index].spillCredit.right
-        while credit > 0 {
-            let radius = CGFloat.random(in: config.radiusRange, using: &rng)
-            let volume = Self.flakeVolume(radius: radius, config: config)
-            guard credit >= volume else { break }
+        while credit >= config.powderVolume {
             let surface = surfaces[index]
             let column = side < 0 ? 0 : surface.heights.count - 1
-            let x = side < 0 ? surface.minX - radius - 2 : surface.maxX + radius + 2
-            let spawned = spawn(
-                at: CGPoint(x: x, y: surface.topY(atColumn: column)), radius: radius, snowVolume: volume,
-                velocity: CGVector(dx: side * CGFloat.random(in: 8...15, using: &rng), dy: 10),
-                driftX: side * CGFloat.random(in: 3...8, using: &rng),
-                swayAmplitude: CGFloat.random(in: 1...2, using: &rng), opacity: 1
-            )
-            guard spawned else { break }
-            credit -= volume
+            let x = side < 0 ? surface.minX - config.powderRadiusRange.upperBound - 2 : surface.maxX + config.powderRadiusRange.upperBound + 2
+            guard spawnPowder(at: CGPoint(x: x, y: surface.topY(atColumn: column)), volume: config.powderVolume,
+                              inheritedVX: 0, outward: side) else { break }
+            credit -= config.powderVolume
         }
         // When the pool is full, don't let unreleased snow pile up without bound.
-        credit = min(credit, maxCredit)
+        credit = min(credit, 10 * config.powderVolume)
         if side < 0 { surfaces[index].spillCredit.left = credit } else { surfaces[index].spillCredit.right = credit }
     }
 
     // MARK: - Spawning
 
     private mutating func spawnSnowfall() {
-        guard activeCount < regularFlakeLimit else { return }
+        guard snowfallCount < config.maxFlakes else { return }
         let radius = CGFloat.random(in: config.radiusRange, using: &rng)
         let position = CGPoint(
             x: CGFloat.random(in: bounds.minX...bounds.maxX, using: &rng),
@@ -281,7 +359,8 @@ public struct SnowSimulation {
             at: position, radius: radius, snowVolume: Self.flakeVolume(radius: radius, config: config),
             velocity: nil, driftX: drift,
             swayAmplitude: CGFloat.random(in: 6...18, using: &rng),
-            opacity: CGFloat.random(in: 0.65...1.0, using: &rng)
+            opacity: CGFloat.random(in: 0.65...1.0, using: &rng),
+            isPowder: false
         )
     }
 
@@ -289,7 +368,7 @@ public struct SnowSimulation {
     @discardableResult
     private mutating func spawn(
         at position: CGPoint, radius: CGFloat, snowVolume: CGFloat, velocity: CGVector?,
-        driftX: CGFloat, swayAmplitude: CGFloat, opacity: CGFloat
+        driftX: CGFloat, swayAmplitude: CGFloat, opacity: CGFloat, isPowder: Bool
     ) -> Bool {
         guard let slot = freeSlots.popLast() else { return false }
         var flake = Flake()
@@ -303,9 +382,11 @@ public struct SnowSimulation {
         flake.swayAmplitude = swayAmplitude
         flake.opacity = opacity
         flake.snowVolume = snowVolume
+        flake.isPowder = isPowder
         flake.isActive = true
         flakes[slot] = flake
         activeCount += 1
+        if !isPowder { snowfallCount += 1 }
         return true
     }
 
@@ -316,6 +397,7 @@ public struct SnowSimulation {
         freeSlots.removeAll(keepingCapacity: true)
         freeSlots.append(contentsOf: (0..<flakes.count).reversed())
         activeCount = 0
+        snowfallCount = 0
         spawnAccumulator = 0
         for i in surfaces.indices { surfaces[i].clear() }
     }
