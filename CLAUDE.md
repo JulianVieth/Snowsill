@@ -6,7 +6,7 @@ Menüleisten-App für macOS, die Schnee über den Bildschirm fallen lässt. Der 
 
 - Swift (Language Mode 5), macOS 14+, Apple Silicon
 - Swift Package (kein Xcode-Projekt), keine Third-Party-Dependencies
-- AppKit für das Overlay-Fenster, SpriteKit fürs Rendering, SwiftUI `MenuBarExtra` für die Einstellungen
+- AppKit für das Overlay-Fenster, Metal (`MTKView`, instanziertes Rendering) fürs Rendering, SwiftUI `MenuBarExtra` für die Einstellungen
 - `CGWindowListCopyWindowInfo` für Fensterpositionen
 - Tests mit `swift-testing` (oder XCTest), nur für die reine Logik
 
@@ -22,18 +22,18 @@ swift run SnowPile          # starten (Beenden über das Menüleisten-Icon)
 ## Architektur
 
 ```
-Sources/SnowPile/              (executableTarget, AppKit/SpriteKit/SwiftUI)
+Sources/SnowPile/              (executableTarget, AppKit/Metal/SwiftUI)
   App/          SnowPileApp.swift (MenuBarExtra, Activation Policy .accessory), Settings.swift
   Overlay/      OverlayWindow.swift (ein Fenster pro Bildschirm), OverlayController.swift
   Windows/      WindowTracker.swift (CGWindowList-Polling)
-  Rendering/    SnowScene.swift (SKScene), SurfaceRenderer.swift
+  Rendering/    SnowRenderer.swift (MTKViewDelegate, Frame-Loop), Shaders.swift (MSL-Quelltext)
 Sources/SnowPileCore/          (Library, nur Foundation/CoreGraphics – testbar)
   Simulation/   Flake.swift, Surface.swift (Heightmap), SnowSimulation.swift, Wind.swift, Occlusion.swift
   Util/         Coordinates.swift
 Tests/SnowPileTests/           (swift-testing, testet SnowPileCore)
 ```
 
-Simulation (reines Swift, kein AppKit/SpriteKit-Import) und Rendering bleiben strikt getrennt. Die Simulation bekommt Oberflächen und Bildschirme als Werte rein und gibt Flocken und Heightmaps raus. Dadurch ist sie testbar.
+Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt getrennt. Die Simulation bekommt Oberflächen und Bildschirme als Werte rein und gibt Flocken und Heightmaps raus. Dadurch ist sie testbar.
 
 ## Kernkonzepte
 
@@ -42,7 +42,7 @@ Simulation (reines Swift, kein AppKit/SpriteKit-Import) und Rendering bleiben st
 - `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = false`, `ignoresMouseEvents = true`
 - `level = .floating` (3): über normalen Fenstern, unter Menüleiste (24), Menüs, Alerts (8), Spotlight und Mitteilungen. Nicht `.statusBar` (25), das liegt über Menüleiste und Alerts. Das Dock (20) liegt über dem Schnee.
 - `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`
-- `SKView` mit `allowsTransparency = true`, Szene mit `backgroundColor = .clear`
+- `MTKView` mit `layer.isOpaque = false`, `clearColor` mit Alpha 0, Blending mit vormultipliziertem Alpha. Shader werden zur Laufzeit mit `makeLibrary(source:)` kompiliert, weil die Command Line Tools keinen Offline-Metal-Compiler haben.
 - Bei `NSApplication.didChangeScreenParametersNotification` die Overlays neu aufbauen
 
 ### Koordinatensysteme (häufigste Fehlerquelle!)
@@ -66,14 +66,14 @@ Simulation (reines Swift, kein AppKit/SpriteKit-Import) und Rendering bleiben st
 - Maximale Höhe: ca. 14 pt auf Fenstern, ca. 50 pt am Boden
 - Schmelzen: langsamer, konstanter Abbau. Etwas schneller, wenn lange kein neuer Schnee kommt.
 - Wird ein Fenster bewegt, skaliert oder geschlossen, wird sein Schnee in fallende Flocken umgewandelt (mit kleinem Zufallsimpuls)
-- Gerendert wird pro Oberfläche ein `SKShapeNode` mit gefülltem Pfad (weiß, leicht bläulicher Schatten). Den Pfad nur neu bauen, wenn sich die Heightmap geändert hat, höchstens mit 20 Hz.
+- Gerendert wird pro Oberfläche ein Triangle-Strip in Metal (weiß, leicht bläulicher Schatten). Die Vertices nur neu bauen, wenn sich die Heightmap geändert hat, höchstens mit 20 Hz.
 
 ### Fallende Flocken
 - Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500)
 - Bewegung: Fallgeschwindigkeit abhängig von der Größe, sinusförmiges Pendeln, dazu der globale Wind
 - Wind: ruhige Grundbrise plus zufällige Böen (geglättetes Rauschen). Gelegentlich kurze „Flurries“ mit vielen Flocken.
 - Kollision: pro Frame prüfen, ob die Flocke eine Oberkante innerhalb ihres x-Bereichs von oben gekreuzt hat. Bei ein paar Dutzend Oberflächen reicht das naiv aus.
-- Rendering über einen Pool von `SKSpriteNode`s mit einer gemeinsamen, prozedural erzeugten Flocken-Textur. Keine SpriteKit-Physics-Bodies.
+- Rendering: alle aktiven Flocken werden pro Frame in einen vorallokierten `MTLBuffer` gepackt (`FlakeInstances.pack`, getestet) und mit einem einzigen instanzierten Draw-Call gezeichnet. Die Scheibe entsteht prozedural im Fragment-Shader. Nicht SpriteKit: 800 `SKSpriteNode`s kosteten allein durch die Property-Setter ca. 10 % CPU.
 
 ### Menüleiste und Einstellungen
 - `MenuBarExtra` mit Schneeflocken-SF-Symbol. Optionen: An/Aus, Intensität (leicht / mittel / Schneesturm), Flockengröße, Wind, Modus „nur aktives Fenster“ oder „alle Fenster“, Schnee am Boden an/aus, „Schnee abschütteln“ (Reset), Launch at Login, Beenden
@@ -85,7 +85,7 @@ Simulation (reines Swift, kein AppKit/SpriteKit-Import) und Rendering bleiben st
 - Unter 5 % CPU bei mittlerer Intensität auf einem M-Chip
 - `preferredFramesPerSecond = 60`, im Akkubetrieb 30
 - Pausieren bei Bildschirmsperre, Display-Sleep und Bildschirmschoner (`NSWorkspace`- bzw. `DistributedNotificationCenter`-Notifications)
-- Keine Allokationen im Frame-Loop: Flocken und Nodes kommen aus dem Pool
+- Keine Allokationen im Frame-Loop: Flocken kommen aus dem Pool, Instanz-Puffer sind dreifach vorallokiert
 
 ## Meilensteine
 
@@ -108,4 +108,4 @@ Immer nur einen Meilenstein auf einmal umsetzen. Danach bauen, testen, committen
 - Keine neuen Dependencies ohne Rückfrage
 - Kleine Commits mit aussagekräftigen Messages auf Deutsch
 - Code und Bezeichner auf Englisch, Kommentare nur, wo das *Warum* nicht offensichtlich ist
-- Swift-Concurrency: UI und SpriteKit laufen auf `@MainActor`, das Fenster-Polling im Hintergrund. Ergebnisse als unveränderliche Snapshots an den Main Actor übergeben.
+- Swift-Concurrency: UI und Rendering laufen auf `@MainActor`, das Fenster-Polling im Hintergrund. Ergebnisse als unveränderliche Snapshots an den Main Actor übergeben.

@@ -1,10 +1,12 @@
 import AppKit
+import MetalKit
 import SnowPileCore
-import SpriteKit
 
 @MainActor
 final class OverlayController {
     private var windows: [OverlayWindow] = []
+    // MTKView holds its delegate weakly.
+    private var renderers: [SnowRenderer] = []
     private var screenObserver: NSObjectProtocol?
     private let debug = ProcessInfo.processInfo.environment["SNOWPILE_DEBUG"] == "1"
 
@@ -27,33 +29,36 @@ final class OverlayController {
 
     private func tearDown() {
         for window in windows {
-            (window.contentView as? SKView)?.presentScene(nil)
+            (window.contentView as? MTKView)?.isPaused = true
             window.orderOut(nil)
         }
         windows.removeAll()
+        renderers.removeAll()
     }
 
     private func rebuild() {
         tearDown()
         // Milestone 1: only the main screen (screens[0] defines the CG origin).
-        guard let mainScreen = NSScreen.screens.first else { return }
+        guard let mainScreen = NSScreen.screens.first,
+              let device = MTLCreateSystemDefaultDevice()
+        else { return }
         let mainHeight = mainScreen.frame.height
 
         let window = OverlayWindow(screen: mainScreen)
-        let view = SKView(frame: NSRect(origin: .zero, size: mainScreen.frame.size))
-        view.allowsTransparency = true
+        let view = MTKView(frame: NSRect(origin: .zero, size: mainScreen.frame.size), device: device)
+        view.colorPixelFormat = .bgra8Unorm
+        view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        view.framebufferOnly = true
         view.preferredFramesPerSecond = 60
-        view.ignoresSiblingOrder = true
-        if debug {
-            view.showsFPS = true
-            view.showsNodeCount = true
-        }
+        view.enableSetNeedsDisplay = false
+        view.layer?.isOpaque = false
 
         let screenFrameCG = Coordinates.cgRect(fromAppKit: mainScreen.frame, mainScreenHeight: mainHeight)
-        let scene = SnowScene(screenFrameCG: screenFrameCG, debug: debug)
+        guard let renderer = SnowRenderer(view: view, screenFrameCG: screenFrameCG, debug: debug) else { return }
+        view.delegate = renderer
         window.contentView = view
-        view.presentScene(scene)
         window.orderFrontRegardless()
         windows.append(window)
+        renderers.append(renderer)
     }
 }
