@@ -3,19 +3,39 @@ import MetalKit
 import QuartzCore
 import SnowPileCore
 
-/// Drives the frame loop of one overlay: steps the simulation and draws all flakes in one instanced draw call.
+/// Drives the frame loop of one overlay: steps the simulation, draws the snow surfaces and then all flakes
+/// in one instanced draw call.
 @MainActor
 final class SnowRenderer: NSObject, MTKViewDelegate {
     private static let maxFramesInFlight = 3
+    private static let meshRebuildInterval: CFTimeInterval = 1.0 / 20
+
+    private struct SurfaceRange {
+        var bodyStart: Int
+        var bodyCount: Int
+        var debugStart: Int
+    }
 
     private let screenFrameCG: CGRect
+    private let debug: Bool
     private var simulation: SnowSimulation
+    private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private let pipeline: MTLRenderPipelineState
+    private let flakePipeline: MTLRenderPipelineState
+    private let surfacePipeline: MTLRenderPipelineState
     private let instanceBuffers: [MTLBuffer]
     private let inFlight = DispatchSemaphore(value: SnowRenderer.maxFramesInFlight)
-    private var bufferIndex = 0
+    private var frameIndex = 0
     private var lastFrameTime: CFTimeInterval?
+
+    // Surface mesh is built on the CPU at most at 20 Hz and copied into a frame's buffer only when that buffer is stale.
+    private var mesh = ContiguousArray<SurfaceVertex>()
+    private var meshRanges: [SurfaceRange] = []
+    private var meshGeneration = 0
+    private var meshSourceVersions: [Int] = []
+    private var lastMeshBuild: CFTimeInterval = -.infinity
+    private var surfaceBuffers: [MTLBuffer] = []
+    private var surfaceBufferGenerations: [Int]
 
     private let debugLabel: NSTextField?
     private var debugFrames = 0
@@ -24,23 +44,16 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     init?(view: MTKView, screenFrameCG: CGRect, debug: Bool) {
         guard let device = view.device, let queue = device.makeCommandQueue() else { return nil }
         self.screenFrameCG = screenFrameCG
+        self.debug = debug
+        self.device = device
         simulation = SnowSimulation(bounds: screenFrameCG)
         commandQueue = queue
+        surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
 
         do {
             let library = try device.makeLibrary(source: Shaders.source, options: nil)
-            let descriptor = MTLRenderPipelineDescriptor()
-            descriptor.vertexFunction = library.makeFunction(name: "flakeVertex")
-            descriptor.fragmentFunction = library.makeFunction(name: "flakeFragment")
-            let attachment = descriptor.colorAttachments[0]!
-            attachment.pixelFormat = view.colorPixelFormat
-            // Premultiplied alpha, matching the transparent window.
-            attachment.isBlendingEnabled = true
-            attachment.sourceRGBBlendFactor = .one
-            attachment.sourceAlphaBlendFactor = .one
-            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            flakePipeline = try Self.makePipeline(device, library, view, vertex: "flakeVertex", fragment: "flakeFragment")
+            surfacePipeline = try Self.makePipeline(device, library, view, vertex: "surfaceVertex", fragment: "surfaceFragment")
         } catch {
             NSLog("SnowPile: Metal pipeline failed: \(error)")
             return nil
@@ -58,13 +71,30 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             let label = NSTextField(labelWithString: "")
             label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .systemRed
-            label.frame = NSRect(x: 12, y: 40, width: 400, height: 20)
+            label.frame = NSRect(x: 12, y: 60, width: 400, height: 20)
             view.addSubview(label)
             debugLabel = label
         } else {
             debugLabel = nil
         }
         super.init()
+    }
+
+    private static func makePipeline(
+        _ device: MTLDevice, _ library: MTLLibrary, _ view: MTKView, vertex: String, fragment: String
+    ) throws -> MTLRenderPipelineState {
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: vertex)
+        descriptor.fragmentFunction = library.makeFunction(name: fragment)
+        let attachment = descriptor.colorAttachments[0]!
+        attachment.pixelFormat = view.colorPixelFormat
+        // Premultiplied alpha, matching the transparent window.
+        attachment.isBlendingEnabled = true
+        attachment.sourceRGBBlendFactor = .one
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        return try device.makeRenderPipelineState(descriptor: descriptor)
     }
 
     nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -78,6 +108,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         let dt = lastFrameTime.map { now - $0 } ?? 0
         lastFrameTime = now
         simulation.step(dt: dt)
+        rebuildMeshIfNeeded(now: now)
         updateDebugLabel(dt: dt)
 
         inFlight.wait()
@@ -89,9 +120,25 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             inFlight.signal()
             return
         }
+        let index = frameIndex
+        frameIndex = (frameIndex + 1) % Self.maxFramesInFlight
+        var viewSize = SIMD2<Float>(Float(view.bounds.width), Float(view.bounds.height))
+        let viewSizeLength = MemoryLayout<SIMD2<Float>>.stride
 
-        let buffer = instanceBuffers[bufferIndex]
-        bufferIndex = (bufferIndex + 1) % Self.maxFramesInFlight
+        if let surfaceBuffer = surfaceBuffer(for: index) {
+            encoder.setRenderPipelineState(surfacePipeline)
+            encoder.setVertexBuffer(surfaceBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&viewSize, length: viewSizeLength, index: 1)
+            for range in meshRanges {
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: range.bodyStart, vertexCount: range.bodyCount)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: range.bodyStart + range.bodyCount, vertexCount: range.bodyCount)
+                if debug {
+                    encoder.drawPrimitives(type: .line, vertexStart: range.debugStart, vertexCount: 2)
+                }
+            }
+        }
+
+        let buffer = instanceBuffers[index]
         let capacity = buffer.length / MemoryLayout<FlakeInstance>.stride
         let pointer = buffer.contents().bindMemory(to: FlakeInstance.self, capacity: capacity)
         let count = FlakeInstances.pack(
@@ -99,12 +146,10 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             screenFrameCG: screenFrameCG,
             into: UnsafeMutableBufferPointer(start: pointer, count: capacity)
         )
-
         if count > 0 {
-            var viewSize = SIMD2<Float>(Float(view.bounds.width), Float(view.bounds.height))
-            encoder.setRenderPipelineState(pipeline)
+            encoder.setRenderPipelineState(flakePipeline)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&viewSize, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
+            encoder.setVertexBytes(&viewSize, length: viewSizeLength, index: 1)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
         }
         encoder.endEncoding()
@@ -115,13 +160,78 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         commandBuffer.commit()
     }
 
+    private func rebuildMeshIfNeeded(now: CFTimeInterval) {
+        let surfaces = simulation.surfaces
+        let layoutChanged = meshSourceVersions.count != surfaces.count
+        guard layoutChanged || now - lastMeshBuild >= Self.meshRebuildInterval else { return }
+        guard layoutChanged || surfaces.indices.contains(where: { surfaces[$0].version != meshSourceVersions[$0] }) else { return }
+        lastMeshBuild = now
+
+        let debugVertices = debug ? 2 : 0
+        let needed = surfaces.reduce(0) { $0 + SurfaceMesh.vertexCount(for: $1) + debugVertices }
+        if mesh.count < needed {
+            mesh = ContiguousArray(repeating: SurfaceVertex(), count: needed)
+        }
+
+        meshRanges.removeAll(keepingCapacity: true)
+        meshSourceVersions.removeAll(keepingCapacity: true)
+        var offset = 0
+        mesh.withUnsafeMutableBufferPointer { out in
+            for surface in surfaces {
+                let count = SurfaceMesh.vertexCount(for: surface)
+                SurfaceMesh.build(surface, screenFrameCG: screenFrameCG, into: UnsafeMutableBufferPointer(rebasing: out[offset..<(offset + count)]))
+                var range = SurfaceRange(bodyStart: offset, bodyCount: count / 2, debugStart: -1)
+                offset += count
+                if debug {
+                    let red = SIMD4<Float>(1, 0, 0, 1)
+                    let start = Coordinates.sceneLocal(CGPoint(x: surface.minX, y: surface.baseY), screenFrameCG: screenFrameCG)
+                    let end = Coordinates.sceneLocal(CGPoint(x: surface.maxX, y: surface.baseY), screenFrameCG: screenFrameCG)
+                    // Half a point above the edge so the line at the screen bottom stays visible.
+                    out[offset].position = SIMD2(Float(start.x), Float(start.y) + 0.5)
+                    out[offset].color = red
+                    out[offset + 1].position = SIMD2(Float(end.x), Float(end.y) + 0.5)
+                    out[offset + 1].color = red
+                    range.debugStart = offset
+                    offset += 2
+                }
+                meshRanges.append(range)
+                meshSourceVersions.append(surface.version)
+            }
+        }
+        meshGeneration &+= 1
+    }
+
+    /// Returns the frame's surface buffer, refreshed from the CPU mesh if it holds an older generation.
+    private func surfaceBuffer(for index: Int) -> MTLBuffer? {
+        guard !meshRanges.isEmpty else { return nil }
+        let length = mesh.count * MemoryLayout<SurfaceVertex>.stride
+        if surfaceBuffers.count != Self.maxFramesInFlight || surfaceBuffers[0].length < length {
+            // Only happens when the set of surfaces grows, never in steady state.
+            surfaceBuffers = (0..<Self.maxFramesInFlight).compactMap { _ in
+                device.makeBuffer(length: length, options: .storageModeShared)
+            }
+            guard surfaceBuffers.count == Self.maxFramesInFlight else { return nil }
+            surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
+        }
+        let buffer = surfaceBuffers[index]
+        if surfaceBufferGenerations[index] != meshGeneration {
+            mesh.withUnsafeBytes { buffer.contents().copyMemory(from: $0.baseAddress!, byteCount: length) }
+            surfaceBufferGenerations[index] = meshGeneration
+        }
+        return buffer
+    }
+
     private func updateDebugLabel(dt: CFTimeInterval) {
         guard let debugLabel else { return }
         debugFrames += 1
         debugElapsed += dt
         guard debugElapsed >= 0.5 else { return }
         let fps = Double(debugFrames) / debugElapsed
-        debugLabel.stringValue = String(format: "%.0f FPS · Flocken: %d/%d", fps, simulation.activeCount, simulation.flakes.count)
+        let maxHeight = simulation.surfaces.first?.heights.max() ?? 0
+        debugLabel.stringValue = String(
+            format: "%.0f FPS · Flocken: %d/%d · Boden max: %.1f pt",
+            fps, simulation.activeCount, simulation.flakes.count, maxHeight
+        )
         debugFrames = 0
         debugElapsed = 0
     }

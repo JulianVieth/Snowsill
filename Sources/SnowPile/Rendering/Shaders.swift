@@ -48,5 +48,29 @@ enum Shaders {
         alpha *= in.opacity;
         return float4(color * alpha, alpha);
     }
+
+    struct SurfaceVertex {
+        float2 position;
+        float4 color;
+    };
+
+    struct SurfaceVertexOut {
+        float4 position [[position]];
+        float4 color;
+    };
+
+    vertex SurfaceVertexOut surfaceVertex(uint vid [[vertex_id]],
+                                          const device SurfaceVertex *vertices [[buffer(0)]],
+                                          constant float2 &viewSize [[buffer(1)]]) {
+        SurfaceVertex v = vertices[vid];
+        SurfaceVertexOut out;
+        out.position = float4(v.position / viewSize * 2.0 - 1.0, 0.0, 1.0);
+        out.color = v.color;
+        return out;
+    }
+
+    fragment float4 surfaceFragment(SurfaceVertexOut in [[stage_in]]) {
+        return in.color;
+    }
     """
 }
