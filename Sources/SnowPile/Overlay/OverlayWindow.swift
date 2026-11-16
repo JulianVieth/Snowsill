@@ -8,7 +8,8 @@ final class OverlayWindow: NSWindow {
         backgroundColor = .clear
         hasShadow = false
         ignoresMouseEvents = true
-        level = .statusBar
+        // Menus, alerts, Spotlight and the menu bar all sit above .floating; normal windows (0) stay below.
+        level = .floating
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         isReleasedWhenClosed = false
         animationBehavior = .none

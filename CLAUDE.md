@@ -40,7 +40,7 @@ Simulation (reines Swift, kein AppKit/SpriteKit-Import) und Rendering bleiben st
 ### Overlay-Fenster
 - Ein randloses `NSWindow` pro `NSScreen`, `frame = screen.frame`
 - `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = false`, `ignoresMouseEvents = true`
-- `level = .statusBar` (über normalen Fenstern, unter Menüs und Alerts)
+- `level = .floating` (3): über normalen Fenstern, unter Menüleiste (24), Menüs, Alerts (8), Spotlight und Mitteilungen. Nicht `.statusBar` (25), das liegt über Menüleiste und Alerts. Das Dock (20) liegt über dem Schnee.
 - `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`
 - `SKView` mit `allowsTransparency = true`, Szene mit `backgroundColor = .clear`
 - Bei `NSApplication.didChangeScreenParametersNotification` die Overlays neu aufbauen
