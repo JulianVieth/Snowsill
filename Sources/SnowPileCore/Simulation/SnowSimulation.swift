@@ -6,6 +6,10 @@ public struct SnowConfig: Sendable {
     /// Flakes spawned per second per 1000 pt of screen width.
     public var spawnRate: Double = 40
     public var radiusRange: ClosedRange<CGFloat> = 1.2...3.6
+    public var groundEnabled = true
+    public var groundMaxHeight: CGFloat = 50
+    /// Share of a flake's disc area that ends up as lying snow. Tuned so the ground fills in about five minutes.
+    public var volumeScale: CGFloat = 0.25
 
     public init() {}
 }
@@ -36,6 +40,7 @@ public struct SnowSimulation {
     public var bounds: CGRect
     public private(set) var flakes: ContiguousArray<Flake>
     public private(set) var activeCount = 0
+    public private(set) var surfaces: ContiguousArray<Surface> = []
 
     private var freeSlots: ContiguousArray<Int>
     private var spawnAccumulator: Double = 0
@@ -49,6 +54,12 @@ public struct SnowSimulation {
         self.rng = SplitMix64(seed: seed)
         flakes = ContiguousArray(repeating: Flake(), count: config.maxFlakes)
         freeSlots = ContiguousArray((0..<config.maxFlakes).reversed())
+        if config.groundEnabled {
+            surfaces.append(Surface(
+                kind: .ground(screen: 0), minX: bounds.minX, baseY: bounds.maxY,
+                width: bounds.width, maxHeight: config.groundMaxHeight, edges: .walls
+            ))
+        }
     }
 
     public mutating func step(dt rawDt: Double) {
@@ -65,11 +76,13 @@ public struct SnowSimulation {
         let margin: CGFloat = 40
         for i in flakes.indices where flakes[i].isActive {
             var flake = flakes[i]
+            let previousY = flake.position.y
             flake.swayPhase += Self.swayFrequency * t
             flake.position.x += (flake.velocity.dx + sin(flake.swayPhase) * flake.swayAmplitude) * t
             flake.position.y += flake.velocity.dy * t
 
-            if flake.position.y - flake.radius > bounds.maxY
+            if land(flake, previousY: previousY)
+                || flake.position.y - flake.radius > bounds.maxY
                 || flake.position.x < bounds.minX - margin
                 || flake.position.x > bounds.maxX + margin {
                 flake.isActive = false
@@ -78,6 +91,26 @@ public struct SnowSimulation {
             }
             flakes[i] = flake
         }
+
+        for i in surfaces.indices {
+            // Ground uses walls, so nothing spills yet. Spilled snow becomes flakes once window surfaces exist (M3).
+            surfaces[i].relax()
+        }
+    }
+
+    /// Deposits the flake if it reached the snow top of a surface below it this step.
+    private mutating func land(_ flake: Flake, previousY: CGFloat) -> Bool {
+        let x = flake.position.x
+        for s in surfaces.indices {
+            guard let column = surfaces[s].column(at: x) else { continue }
+            // Was above the edge before, is at or below the snow top now. Also catches flakes that the
+            // growing snow rose past since the last step.
+            guard previousY <= surfaces[s].baseY, flake.position.y >= surfaces[s].topY(atColumn: column) else { continue }
+            let volume = .pi * flake.radius * flake.radius * config.volumeScale
+            surfaces[s].deposit(volume: volume, minX: x - flake.radius, maxX: x + flake.radius)
+            return true
+        }
+        return false
     }
 
     public mutating func reset() {
@@ -86,6 +119,7 @@ public struct SnowSimulation {
         freeSlots.append(contentsOf: (0..<flakes.count).reversed())
         activeCount = 0
         spawnAccumulator = 0
+        for i in surfaces.indices { surfaces[i].clear() }
     }
 
     private mutating func spawn() {
