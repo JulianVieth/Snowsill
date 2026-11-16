@@ -30,6 +30,7 @@ Sources/SnowPile/              (executableTarget, AppKit/Metal/SwiftUI)
 Sources/SnowPileCore/          (Library, nur Foundation/CoreGraphics – testbar)
   Simulation/   Flake.swift, Surface.swift (Heightmap), SnowSimulation.swift, Wind.swift, Occlusion.swift
   Rendering/    FlakeInstances.swift, SurfaceMesh.swift (GPU-Daten packen, ohne Metal-Import)
+  Windows/      WindowFilter.swift (Fensterliste filtern, aktives Fenster; reine Logik)
   Util/         Coordinates.swift
 Tests/SnowPileTests/           (swift-testing, testet SnowPileCore)
 ```

@@ -8,6 +8,11 @@ final class OverlayController {
     // MTKView holds its delegate weakly.
     private var renderers: [SnowRenderer] = []
     private var screenObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
+    private let tracker = WindowTracker()
+    private var windowList: [WindowInfo] = []
+    /// Last active app other than SnowPile itself, so opening our menu doesn't shake snow off the active window.
+    private var activePID: Int32?
     private let debug = ProcessInfo.processInfo.environment["SNOWPILE_DEBUG"] == "1"
 
     func start() {
@@ -18,13 +23,45 @@ final class OverlayController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.rebuild() }
         }
+
+        let ownPID = getpid()
+        if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, pid != ownPID {
+            activePID = pid
+        }
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard let pid = app?.processIdentifier, pid != ownPID else { return }
+            MainActor.assumeIsolated {
+                self?.activePID = pid
+                self?.applyWindows()
+            }
+        }
+
         rebuild()
+        tracker.start { [weak self] windows in
+            self?.windowList = windows
+            self?.applyWindows()
+        }
     }
 
     func stop() {
+        tracker.stop()
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
         screenObserver = nil
+        activationObserver = nil
         tearDown()
+    }
+
+    /// Milestone 3: only the active window carries snow.
+    private func applyWindows() {
+        let active = WindowFilter.activeWindow(in: windowList, activePID: activePID)
+        let windows = active.map { [$0] } ?? []
+        for renderer in renderers { renderer.setWindows(windows) }
     }
 
     private func tearDown() {
@@ -60,5 +97,6 @@ final class OverlayController {
         window.orderFrontRegardless()
         windows.append(window)
         renderers.append(renderer)
+        applyWindows()
     }
 }

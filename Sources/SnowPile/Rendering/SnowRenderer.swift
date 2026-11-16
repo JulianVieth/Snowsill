@@ -32,7 +32,8 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var mesh = ContiguousArray<SurfaceVertex>()
     private var meshRanges: [SurfaceRange] = []
     private var meshGeneration = 0
-    private var meshSourceVersions: [Int] = []
+    /// (surface id, version) the current mesh was built from.
+    private var meshSources: [SIMD2<Int>] = []
     private var lastMeshBuild: CFTimeInterval = -.infinity
     private var surfaceBuffers: [MTLBuffer] = []
     private var surfaceBufferGenerations: [Int]
@@ -71,7 +72,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             let label = NSTextField(labelWithString: "")
             label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .systemRed
-            label.frame = NSRect(x: 12, y: 60, width: 400, height: 20)
+            label.frame = NSRect(x: 12, y: 60, width: 760, height: 20)
             view.addSubview(label)
             debugLabel = label
         } else {
@@ -162,9 +163,10 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
     private func rebuildMeshIfNeeded(now: CFTimeInterval) {
         let surfaces = simulation.surfaces
-        let layoutChanged = meshSourceVersions.count != surfaces.count
+        let layoutChanged = meshSources.count != surfaces.count
+            || surfaces.indices.contains { surfaces[$0].id != meshSources[$0].x }
         guard layoutChanged || now - lastMeshBuild >= Self.meshRebuildInterval else { return }
-        guard layoutChanged || surfaces.indices.contains(where: { surfaces[$0].version != meshSourceVersions[$0] }) else { return }
+        guard layoutChanged || surfaces.indices.contains(where: { surfaces[$0].version != meshSources[$0].y }) else { return }
         lastMeshBuild = now
 
         let debugVertices = debug ? 2 : 0
@@ -174,7 +176,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         }
 
         meshRanges.removeAll(keepingCapacity: true)
-        meshSourceVersions.removeAll(keepingCapacity: true)
+        meshSources.removeAll(keepingCapacity: true)
         var offset = 0
         mesh.withUnsafeMutableBufferPointer { out in
             for surface in surfaces {
@@ -195,7 +197,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
                     offset += 2
                 }
                 meshRanges.append(range)
-                meshSourceVersions.append(surface.version)
+                meshSources.append(SIMD2(surface.id, surface.version))
             }
         }
         meshGeneration &+= 1
@@ -221,16 +223,24 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         return buffer
     }
 
+    func setWindows(_ windows: [WindowInfo]) {
+        simulation.setWindows(windows)
+    }
+
     private func updateDebugLabel(dt: CFTimeInterval) {
         guard let debugLabel else { return }
         debugFrames += 1
         debugElapsed += dt
         guard debugElapsed >= 0.5 else { return }
         let fps = Double(debugFrames) / debugElapsed
-        let maxHeight = simulation.surfaces.first?.heights.max() ?? 0
+        var groundMax: CGFloat = 0
+        var windowSurfaces = 0
+        for surface in simulation.surfaces {
+            if case .ground = surface.kind { groundMax = surface.heights.max() ?? 0 } else { windowSurfaces += 1 }
+        }
         debugLabel.stringValue = String(
-            format: "%.0f FPS · Flocken: %d/%d · Boden max: %.1f pt",
-            fps, simulation.activeCount, simulation.flakes.count, maxHeight
+            format: "%.0f FPS · Flocken: %d/%d · Boden max: %.1f pt · Fensterkanten: %d",
+            fps, simulation.activeCount, simulation.flakes.count, groundMax, windowSurfaces
         )
         debugFrames = 0
         debugElapsed = 0
