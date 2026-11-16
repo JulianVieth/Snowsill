@@ -22,13 +22,15 @@ public struct Surface: Sendable {
     public let kind: Kind
     /// Unique per surface instance, so a recreated surface (moved window) is never mistaken for the old one.
     public let id: Int
-    public let minX: CGFloat
-    public let baseY: CGFloat
+    public private(set) var minX: CGFloat
+    public private(set) var baseY: CGFloat
     public let maxHeight: CGFloat
     public let edges: Edges
     public private(set) var heights: ContiguousArray<CGFloat>
     /// Changes whenever the heightmap changes, so the renderer only rebuilds when needed.
     public private(set) var version = 0
+    /// Changes when position or size change. The renderer rebuilds immediately then, so snow sticks to a moving window.
+    public private(set) var geometryVersion = 0
     /// Spilled volume not yet turned into flakes.
     var spillCredit: (left: CGFloat, right: CGFloat) = (0, 0)
 
@@ -92,6 +94,32 @@ public struct Surface: Sendable {
         }
         if changed || spilled.left > 0 || spilled.right > 0 { version &+= 1 }
         return spilled
+    }
+
+    /// Moves the surface to a new position and width, carrying the snow along.
+    /// New column `j` takes old column `j + columnOffset`. Old columns that no longer fit are returned as lost volume
+    /// per side, so the caller can let them fall off.
+    @discardableResult
+    public mutating func relocate(minX newMinX: CGFloat, baseY newBaseY: CGFloat, width: CGFloat, columnOffset: Int) -> (left: CGFloat, right: CGFloat) {
+        let newCount = max(Int((width / Self.columnWidth).rounded(.up)), 1)
+        var lost: (left: CGFloat, right: CGFloat) = (0, 0)
+        var newHeights = ContiguousArray<CGFloat>(repeating: 0, count: newCount)
+        for k in heights.indices where heights[k] > 0 {
+            let j = k - columnOffset
+            if j < 0 {
+                lost.left += heights[k] * Self.columnWidth
+            } else if j >= newCount {
+                lost.right += heights[k] * Self.columnWidth
+            } else {
+                newHeights[j] = heights[k]
+            }
+        }
+        heights = newHeights
+        minX = newMinX
+        baseY = newBaseY
+        geometryVersion &+= 1
+        version &+= 1
+        return lost
     }
 
     public mutating func clear() {

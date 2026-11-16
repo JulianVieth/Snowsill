@@ -121,4 +121,64 @@ import Testing
         surface.clear()
         #expect(surface.totalVolume == 0)
     }
+
+    // MARK: - Relocation
+
+    func filled(_ heights: [CGFloat]) -> Surface {
+        var surface = Surface(kind: .window(number: 1), minX: 100, baseY: 500,
+                              width: CGFloat(heights.count) * 2, maxHeight: 50, edges: .spill)
+        for (i, h) in heights.enumerated() where h > 0 {
+            surface.deposit(volume: h * 2, minX: 100 + CGFloat(i) * 2, maxX: 102 + CGFloat(i) * 2)
+        }
+        return surface
+    }
+
+    @Test func relocateCarriesSnowAlong() {
+        var surface = filled([1, 2, 3, 4])
+        let geometry = surface.geometryVersion
+        let lost = surface.relocate(minX: 300, baseY: 250, width: 8, columnOffset: 0)
+        #expect(surface.minX == 300)
+        #expect(surface.baseY == 250)
+        #expect(Array(surface.heights) == [1, 2, 3, 4])
+        #expect(lost.left == 0 && lost.right == 0)
+        #expect(surface.geometryVersion != geometry)
+    }
+
+    @Test func positiveOffsetLosesSnowOnTheLeft() {
+        var surface = filled([1, 2, 3, 4])
+        // New column j takes old column j + 2: the layer slid left relative to the window.
+        let lost = surface.relocate(minX: 100, baseY: 500, width: 8, columnOffset: 2)
+        #expect(Array(surface.heights) == [3, 4, 0, 0])
+        #expect(lost.left == CGFloat(6))
+        #expect(lost.right == 0)
+    }
+
+    @Test func negativeOffsetLosesSnowOnTheRight() {
+        var surface = filled([1, 2, 3, 4])
+        let lost = surface.relocate(minX: 100, baseY: 500, width: 8, columnOffset: -1)
+        #expect(Array(surface.heights) == [0, 1, 2, 3])
+        #expect(lost.left == 0)
+        #expect(lost.right == CGFloat(8))
+    }
+
+    @Test func shrinkingCutsOffTheRightEnd() {
+        var surface = filled([1, 2, 3, 4])
+        let lost = surface.relocate(minX: 100, baseY: 500, width: 4, columnOffset: 0)
+        #expect(Array(surface.heights) == [1, 2])
+        #expect(lost.right == CGFloat(14))
+    }
+
+    @Test func growingAddsEmptyColumns() {
+        var surface = filled([1, 2])
+        let lost = surface.relocate(minX: 96, baseY: 500, width: 10, columnOffset: -2)
+        #expect(Array(surface.heights) == [0, 0, 1, 2, 0])
+        #expect(lost.left == 0 && lost.right == 0)
+    }
+
+    @Test func relocateConservesVolume() {
+        var surface = filled([5, 1, 7, 2, 9, 3])
+        let before = surface.totalVolume
+        let lost = surface.relocate(minX: 50, baseY: 400, width: 6, columnOffset: 2)
+        #expect(abs(surface.totalVolume + lost.left + lost.right - before) < 1e-9)
+    }
 }
