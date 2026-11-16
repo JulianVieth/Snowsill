@@ -59,10 +59,14 @@ final class SnowScene: SKScene {
                     if !node.isHidden { node.isHidden = true }
                     continue
                 }
-                node.isHidden = false
+                // A slot is always hidden for at least one frame between two flakes, so hidden + active means freshly spawned.
+                // Setting SpriteKit properties is expensive, so radius and opacity are only applied then.
+                if node.isHidden {
+                    node.isHidden = false
+                    node.setScale(flake.radius / Self.textureRadius)
+                    node.alpha = flake.opacity
+                }
                 node.position = Coordinates.sceneLocal(flake.position, screenFrameCG: screenFrameCG)
-                node.setScale(flake.radius / Self.textureRadius)
-                node.alpha = flake.opacity
             }
         }
 
