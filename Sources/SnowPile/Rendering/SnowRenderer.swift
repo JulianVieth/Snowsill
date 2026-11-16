@@ -9,6 +9,10 @@ import SnowPileCore
 final class SnowRenderer: NSObject, MTKViewDelegate {
     private static let maxFramesInFlight = 3
     private static let meshRebuildInterval: CFTimeInterval = 1.0 / 20
+    /// Time from rendering a frame until it is on screen (two drawables at 60 Hz).
+    private static let displayLatency: CFTimeInterval = 1.0 / 60
+    /// Never extrapolate further than this, in case updates stop arriving.
+    private static let maxPrediction: CFTimeInterval = 0.1
 
     private struct SurfaceRange {
         var bodyStart: Int
@@ -35,6 +39,8 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     /// (surface id, geometry version, version) the current mesh was built from.
     private var meshSources: [SIMD3<Int>] = []
     private var lastMeshBuild: CFTimeInterval = -.infinity
+    /// Whether the last mesh was built with a predicted offset; then the next frame must rebuild as well.
+    private var meshWasPredicted = false
     private var surfaceBuffers: [MTLBuffer] = []
     private var surfaceBufferGenerations: [Int]
 
@@ -165,12 +171,14 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         let surfaces = simulation.surfaces
         // Moved or new surfaces are rebuilt right away so the snow sticks to a dragged window;
         // snow piling up only needs the 20 Hz rate.
-        let layoutChanged = meshSources.count != surfaces.count || surfaces.indices.contains {
+        let isMoving = surfaces.contains { predictedOffset(for: $0, now: now) != .zero }
+        let layoutChanged = isMoving || meshWasPredicted || meshSources.count != surfaces.count || surfaces.indices.contains {
             surfaces[$0].id != meshSources[$0].x || surfaces[$0].geometryVersion != meshSources[$0].y
         }
         guard layoutChanged || now - lastMeshBuild >= Self.meshRebuildInterval else { return }
         guard layoutChanged || surfaces.indices.contains(where: { surfaces[$0].version != meshSources[$0].z }) else { return }
         lastMeshBuild = now
+        meshWasPredicted = isMoving
 
         let debugVertices = debug ? 2 : 0
         let needed = surfaces.reduce(0) { $0 + SurfaceMesh.vertexCount(for: $1) + debugVertices }
@@ -184,13 +192,18 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         mesh.withUnsafeMutableBufferPointer { out in
             for surface in surfaces {
                 let count = SurfaceMesh.vertexCount(for: surface)
-                SurfaceMesh.build(surface, screenFrameCG: screenFrameCG, into: UnsafeMutableBufferPointer(rebasing: out[offset..<(offset + count)]))
+                let predicted = predictedOffset(for: surface, now: now)
+                SurfaceMesh.build(
+                    surface, screenFrameCG: screenFrameCG, offset: predicted,
+                    into: UnsafeMutableBufferPointer(rebasing: out[offset..<(offset + count)])
+                )
                 var range = SurfaceRange(bodyStart: offset, bodyCount: count / 2, debugStart: -1)
                 offset += count
                 if debug {
                     let red = SIMD4<Float>(1, 0, 0, 1)
-                    let start = Coordinates.sceneLocal(CGPoint(x: surface.minX, y: surface.baseY), screenFrameCG: screenFrameCG)
-                    let end = Coordinates.sceneLocal(CGPoint(x: surface.maxX, y: surface.baseY), screenFrameCG: screenFrameCG)
+                    let y = surface.baseY + predicted.dy
+                    let start = Coordinates.sceneLocal(CGPoint(x: surface.minX + predicted.dx, y: y), screenFrameCG: screenFrameCG)
+                    let end = Coordinates.sceneLocal(CGPoint(x: surface.maxX + predicted.dx, y: y), screenFrameCG: screenFrameCG)
                     // Half a point above the edge so the line at the screen bottom stays visible.
                     out[offset].position = SIMD2(Float(start.x), Float(start.y) + 0.5)
                     out[offset].color = red
@@ -226,6 +239,15 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         return buffer
     }
 
+    /// Window positions arrive with a delay and the frame shows even later. Moving window surfaces are drawn
+    /// where the window will be by then, extrapolated from its measured velocity.
+    private func predictedOffset(for surface: Surface, now: CFTimeInterval) -> CGVector {
+        guard case .window(let number) = surface.kind,
+              let motion = simulation.motion(ofWindow: number), motion.velocity != .zero else { return .zero }
+        let horizon = CGFloat(min(max(now - motion.timestamp + Self.displayLatency, 0), Self.maxPrediction))
+        return CGVector(dx: motion.velocity.dx * horizon, dy: motion.velocity.dy * horizon)
+    }
+
     func setWindows(_ windows: [WindowInfo], timestamp: CFTimeInterval) {
         simulation.setWindows(windows, timestamp: timestamp)
     }
@@ -242,8 +264,9 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             if case .ground = surface.kind { groundMax = surface.heights.max() ?? 0 } else { windowSurfaces += 1 }
         }
         debugLabel.stringValue = String(
-            format: "%.0f FPS · Flocken: %d/%d · Boden max: %.1f pt · Fensterkanten: %d",
-            fps, simulation.activeCount, simulation.flakes.count, groundMax, windowSurfaces
+            format: "%.0f FPS · Flocken: %d/%d · Pulver: %d · Boden max: %.1f pt · Fensterkanten: %d",
+            fps, simulation.snowfallCount, simulation.config.maxFlakes,
+            simulation.activeCount - simulation.snowfallCount, groundMax, windowSurfaces
         )
         debugFrames = 0
         debugElapsed = 0

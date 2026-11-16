@@ -15,10 +15,10 @@ public struct SnowConfig: Sendable {
     public var volumeScale: CGFloat = 0.25
     /// Extra pool slots for powder (snow falling off windows), on top of `maxFlakes`.
     /// Enough for a completely full window to turn into powder at once.
-    public var powderCapacity = 1200
-    public var powderRadiusRange: ClosedRange<CGFloat> = 0.6...1.3
+    public var powderCapacity = 2200
+    public var powderRadiusRange: ClosedRange<CGFloat> = 1.0...2.0
     /// Volume each powder particle carries. Raised automatically when the pool would not suffice.
-    public var powderVolume: CGFloat = 5
+    public var powderVolume: CGFloat = 2.5
     /// Horizontal window speed (pt/s) above which the snow can no longer keep up and starts sliding off.
     public var slipSpeed: CGFloat = 900
     /// Share of the movement beyond `slipSpeed` that the snow lags behind.
@@ -72,6 +72,8 @@ public struct SnowSimulation {
         var timestamp: Double
         /// Sub-column part of the snow's offset that column-wise relocation couldn't apply yet.
         var columnResidual: CGFloat
+        /// Smoothed velocity of the window's top-left corner (pt/s), zero while resizing or standing still.
+        var velocity: CGVector = .zero
     }
 
     private var tracked: [Int: TrackedWindow] = [:]
@@ -177,13 +179,19 @@ public struct SnowSimulation {
             let previous = tracked[window.number]
             let surface = existing.removeValue(forKey: window.number)
 
-            if let previous, Self.isSame(window.bounds, previous.bounds) {
+            if var previous, Self.isSame(window.bounds, previous.bounds) {
+                previous.timestamp = timestamp
+                previous.velocity = .zero
                 newTracked[window.number] = previous
                 if let surface { updated.append(surface) }
                 continue
             }
 
             var residual: CGFloat = 0
+            var velocity = CGVector.zero
+            if let previous {
+                velocity = Self.measureVelocity(from: previous, to: window.bounds, timestamp: timestamp)
+            }
             let geometry = windowSurfaceGeometry(window.bounds)
             if var surface, let previous, let geometry {
                 residual = relocate(&surface, from: previous, to: window.bounds, geometry: geometry, timestamp: timestamp)
@@ -197,12 +205,31 @@ public struct SnowSimulation {
                     ))
                 }
             }
-            newTracked[window.number] = TrackedWindow(bounds: window.bounds, timestamp: timestamp, columnResidual: residual)
+            newTracked[window.number] = TrackedWindow(
+                bounds: window.bounds, timestamp: timestamp, columnResidual: residual, velocity: velocity
+            )
         }
 
         for surface in existing.values { powderize(surface) }
         surfaces = updated
         tracked = newTracked
+    }
+
+    /// Velocity of a window's top-left corner and when it was measured, so the renderer can predict where the
+    /// window is by the time a frame shows. Nil for windows that aren't tracked.
+    public func motion(ofWindow number: Int) -> (velocity: CGVector, timestamp: Double)? {
+        tracked[number].map { ($0.velocity, $0.timestamp) }
+    }
+
+    private static func measureVelocity(from previous: TrackedWindow, to bounds: CGRect, timestamp: Double) -> CGVector {
+        let resized = abs(bounds.width - previous.bounds.width) > moveTolerance
+            || abs(bounds.height - previous.bounds.height) > moveTolerance
+        guard !resized else { return .zero }
+        let dt = CGFloat(max(timestamp - previous.timestamp, 1.0 / 240))
+        let measured = CGVector(dx: (bounds.minX - previous.bounds.minX) / dt, dy: (bounds.minY - previous.bounds.minY) / dt)
+        // Polls aren't aligned to the window server's frames, so single measurements jump; average with the last one.
+        guard previous.velocity != .zero else { return measured }
+        return CGVector(dx: (previous.velocity.dx + measured.dx) / 2, dy: (previous.velocity.dy + measured.dy) / 2)
     }
 
     private static func isSame(_ a: CGRect, _ b: CGRect) -> Bool {
@@ -323,7 +350,7 @@ public struct SnowSimulation {
             at: position, radius: radius, snowVolume: volume, velocity: velocity,
             driftX: outward * 2 + CGFloat.random(in: -3...3, using: &rng),
             swayAmplitude: outward == 0 ? CGFloat.random(in: 4...12, using: &rng) : CGFloat.random(in: 1...2, using: &rng),
-            opacity: CGFloat.random(in: 0.35...0.8, using: &rng),
+            opacity: CGFloat.random(in: 0.75...1.0, using: &rng),
             isPowder: true
         )
     }

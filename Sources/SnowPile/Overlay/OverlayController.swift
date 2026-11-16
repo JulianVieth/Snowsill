@@ -91,6 +91,8 @@ final class OverlayController {
         view.preferredFramesPerSecond = 60
         view.enableSetNeedsDisplay = false
         view.layer?.isOpaque = false
+        // Two instead of three queued drawables: one frame less latency, so snow lags less behind a dragged window.
+        (view.layer as? CAMetalLayer)?.maximumDrawableCount = 2
 
         let screenFrameCG = Coordinates.cgRect(fromAppKit: mainScreen.frame, mainScreenHeight: mainHeight)
         guard let renderer = SnowRenderer(view: view, screenFrameCG: screenFrameCG, debug: debug) else { return }

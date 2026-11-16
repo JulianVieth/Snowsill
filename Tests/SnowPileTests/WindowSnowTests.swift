@@ -139,6 +139,41 @@ import Testing
         #expect(abs(after.totalVolume + airborneVolume(sim) - volume) < 1e-6)
     }
 
+    // MARK: - Motion (for render prediction)
+
+    @Test func motionReportsVelocityOfAMovingWindow() throws {
+        var sim = simWithSnow()
+        sim.setWindows([moved(dx: 10, dy: -5)], timestamp: 0.02)
+        let motion = try #require(sim.motion(ofWindow: 42))
+        #expect(abs(motion.velocity.dx - 500) < 1e-6)
+        #expect(abs(motion.velocity.dy + 250) < 1e-6)
+        #expect(motion.timestamp == 0.02)
+    }
+
+    @Test func motionStopsWhenThePositionStaysTheSame() throws {
+        var sim = simWithSnow()
+        sim.setWindows([moved(dx: 10)], timestamp: 0.02)
+        sim.setWindows([moved(dx: 10)], timestamp: 0.04)
+        let motion = try #require(sim.motion(ofWindow: 42))
+        #expect(motion.velocity == .zero)
+        #expect(motion.timestamp == 0.04)
+    }
+
+    @Test func motionIsSmoothed() throws {
+        var sim = simWithSnow()
+        sim.setWindows([moved(dx: 10)], timestamp: 0.02)   // 500 pt/s
+        sim.setWindows([moved(dx: 30)], timestamp: 0.04)   // 1000 pt/s
+        let motion = try #require(sim.motion(ofWindow: 42))
+        #expect(motion.velocity.dx > 500 && motion.velocity.dx < 1000)
+    }
+
+    @Test func resizingHasNoMotion() throws {
+        var sim = simWithSnow()
+        sim.setWindows([moved(dx: -20, dw: 20)], timestamp: 0.02)
+        #expect(try #require(sim.motion(ofWindow: 42)).velocity == .zero)
+        #expect(sim.motion(ofWindow: 7) == nil)
+    }
+
     // MARK: - Resizing
 
     @Test func growingFromTheRightKeepsSnowInPlace() throws {

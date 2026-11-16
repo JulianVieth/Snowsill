@@ -5,6 +5,7 @@ import SnowPileCore
 
 /// Polls the window list on a background queue and hands changed lists to the main actor as immutable snapshots.
 /// Polls at 12 Hz while nothing moves and at 60 Hz right after a change, so snow keeps up with a dragged window.
+/// In fast mode every poll is delivered, also unchanged ones: that is how the simulation learns a window stopped.
 final class WindowTracker: @unchecked Sendable {
     typealias Handler = @MainActor @Sendable (_ windows: [WindowInfo], _ timestamp: CFTimeInterval) -> Void
 
@@ -53,10 +54,13 @@ final class WindowTracker: @unchecked Sendable {
             as? [[String: Any]] else { return }
         let windows = WindowFilter.parse(raw, ownPID: ownPID)
 
-        if windows != last {
+        let changed = windows != last
+        if changed || isFast {
+            Task { @MainActor in onChange(windows, now) }
+        }
+        if changed {
             last = windows
             lastChange = now
-            Task { @MainActor in onChange(windows, now) }
             if !isFast {
                 isFast = true
                 schedule(Self.activeInterval)

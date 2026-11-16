@@ -70,6 +70,21 @@ import Testing
         #expect(out[4].position == SIMD2(4, 0))
     }
 
+    @Test func offsetShiftsTheWholeMeshInCGDirections() {
+        var ground = makeGround()
+        ground.deposit(volume: 8, minX: 2, maxX: 4)
+        let plain = build(ground)
+        var shifted = [SurfaceVertex](repeating: SurfaceVertex(), count: plain.count)
+        _ = shifted.withUnsafeMutableBufferPointer {
+            // CG offset: 10 right, 5 down -> scene: 10 right, 5 down (negative y)
+            SurfaceMesh.build(ground, screenFrameCG: screen, offset: CGVector(dx: 10, dy: 5), into: $0)
+        }
+        for (a, b) in zip(plain, shifted) {
+            #expect(b.position == a.position + SIMD2(10, -5))
+            #expect(b.color == a.color)
+        }
+    }
+
     @Test func tooSmallBufferWritesNothing() {
         var out = [SurfaceVertex](repeating: SurfaceVertex(), count: 3)
         let written = out.withUnsafeMutableBufferPointer {

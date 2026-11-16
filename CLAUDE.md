@@ -55,7 +55,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - **Die Simulation rechnet komplett in CG-Koordinaten.** Umgerechnet wird nur beim Rendern in die lokale Szene des jeweiligen Bildschirms. Alles davon steckt in `Coordinates.swift` und ist getestet.
 
 ### Fenster erkennen
-- `CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)` auf einer Background-Queue abfragen: 12 Hz in Ruhe, nach jeder Änderung 0,5 s lang 60 Hz (eine Abfrage kostet ca. 0,3 ms), damit der Schnee beim Ziehen am Fenster klebt
+- `CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)` auf einer Background-Queue abfragen: 12 Hz in Ruhe, nach jeder Änderung 0,5 s lang 60 Hz (eine Abfrage kostet ca. 0,3 ms), damit der Schnee beim Ziehen am Fenster klebt. Während schneller Phase wird jede Abfrage geliefert, auch unveränderte, damit ein Stillstand sofort erkannt wird. Der Renderer zeichnet bewegte Fensterkanten um Geschwindigkeit × Latenz vorausberechnet; dazu `maximumDrawableCount = 2`. Minimieren ist erst erkennbar, wenn das Fenster nach der Animation aus der Liste verschwindet.
 - Nur `kCGWindowLayer == 0` verwenden. Herausfiltern: eigene PID, `kCGWindowAlpha == 0` und Fenster unter 80×40 pt
 - Nur `kCGWindowBounds`, `kCGWindowNumber`, `kCGWindowOwnerPID` und `kCGWindowLayer` lesen. **`kCGWindowName` nicht verwenden**, sonst verlangt macOS die Bildschirmaufnahme-Berechtigung.
 - Fenster über `kCGWindowNumber` identifizieren. Pro Poll diffen: neu, bewegt/skaliert oder verschwunden.
@@ -69,11 +69,11 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Schmelzen: langsamer, konstanter Abbau. Etwas schneller, wenn lange kein neuer Schnee kommt.
 - Wird ein Fenster bewegt, wandert sein Schnee als zusammenhängende Masse mit (`Surface.relocate`, spaltengenau, ohne Verlust). Beim Skalieren bleibt er an seiner absoluten Position.
 - Herunter fällt Schnee nur, wo er über eine Kante gerät: bei schnellem seitlichen Ziehen (Trägheit ab ca. 900 pt/s, er rutscht zur hinteren Kante), beim Verkleinern, an der Bildschirmkante und beim Schließen (dann die ganze Schicht)
-- Herabfallender Schnee ist **Pulver**, keine Flocken: kleine, halbtransparente Partikel, langsamer, stärkeres Pendeln. Jedes Partikel trägt sein Schneevolumen und gibt es beim Landen wieder ab, die Menge bleibt erhalten.
+- Herabfallender Schnee ist **Pulver**, keine Flocken: kleine Partikel (1–2 pt, sonst unsichtbar), langsamer, stärkeres Pendeln. Jedes Partikel trägt sein Schneevolumen und gibt es beim Landen wieder ab, die Menge bleibt erhalten.
 - Gerendert wird pro Oberfläche ein Triangle-Strip in Metal (weiß, leicht bläulicher Schatten). Die Vertices nur neu bauen, wenn sich die Heightmap geändert hat, höchstens mit 20 Hz.
 
 ### Fallende Flocken
-- Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500), dazu 1200 Plätze für Pulver, damit auch ein volles Fenster komplett zerstäuben kann, ohne den Schneefall zu unterbrechen
+- Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500), dazu 2200 Plätze für Pulver, damit auch ein volles Fenster komplett zerstäuben kann, ohne den Schneefall zu unterbrechen
 - Bewegung: Fallgeschwindigkeit abhängig von der Größe, sinusförmiges Pendeln, dazu der globale Wind
 - Wind: ruhige Grundbrise plus zufällige Böen (geglättetes Rauschen). Gelegentlich kurze „Flurries“ mit vielen Flocken.
 - Kollision: pro Frame prüfen, ob die Flocke eine Oberkante innerhalb ihres x-Bereichs von oben gekreuzt hat. Bei ein paar Dutzend Oberflächen reicht das naiv aus.

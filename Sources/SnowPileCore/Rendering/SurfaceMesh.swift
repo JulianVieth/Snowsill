@@ -24,14 +24,17 @@ public enum SurfaceMesh {
     }
 
     /// Body strip comes first (`vertexCount / 2` vertices), then the fringe strip. Returns the number of vertices written.
+    /// `offset` (CG directions) shifts the whole mesh, used to predict where a moving window is by the time the frame shows.
     @discardableResult
-    public static func build(_ surface: Surface, screenFrameCG: CGRect, into buffer: UnsafeMutableBufferPointer<SurfaceVertex>) -> Int {
+    public static func build(
+        _ surface: Surface, screenFrameCG: CGRect, offset: CGVector = .zero, into buffer: UnsafeMutableBufferPointer<SurfaceVertex>
+    ) -> Int {
         let total = vertexCount(for: surface)
         guard buffer.count >= total else { return 0 }
 
         let heights = surface.heights
         let columns = heights.count
-        let base = Coordinates.sceneLocal(CGPoint(x: surface.minX, y: surface.baseY), screenFrameCG: screenFrameCG)
+        let base = Coordinates.sceneLocal(CGPoint(x: surface.minX + offset.dx, y: surface.baseY + offset.dy), screenFrameCG: screenFrameCG)
         let baseX = Float(base.x)
         let baseY = Float(base.y)
         let width = Float(Surface.columnWidth)
