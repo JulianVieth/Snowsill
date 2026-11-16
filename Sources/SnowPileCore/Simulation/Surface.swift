@@ -20,6 +20,8 @@ public struct Surface: Sendable {
     public static let reposeRatio: CGFloat = 1.5
 
     public let kind: Kind
+    /// Unique per surface instance, so a recreated surface (moved window) is never mistaken for the old one.
+    public let id: Int
     public let minX: CGFloat
     public let baseY: CGFloat
     public let maxHeight: CGFloat
@@ -27,9 +29,12 @@ public struct Surface: Sendable {
     public private(set) var heights: ContiguousArray<CGFloat>
     /// Changes whenever the heightmap changes, so the renderer only rebuilds when needed.
     public private(set) var version = 0
+    /// Spilled volume not yet turned into flakes.
+    var spillCredit: (left: CGFloat, right: CGFloat) = (0, 0)
 
-    public init(kind: Kind, minX: CGFloat, baseY: CGFloat, width: CGFloat, maxHeight: CGFloat, edges: Edges) {
+    public init(kind: Kind, minX: CGFloat, baseY: CGFloat, width: CGFloat, maxHeight: CGFloat, edges: Edges, id: Int = 0) {
         self.kind = kind
+        self.id = id
         self.minX = minX
         self.baseY = baseY
         self.maxHeight = maxHeight
@@ -90,6 +95,7 @@ public struct Surface: Sendable {
     }
 
     public mutating func clear() {
+        spillCredit = (0, 0)
         guard heights.contains(where: { $0 > 0 }) else { return }
         for i in heights.indices { heights[i] = 0 }
         version &+= 1
