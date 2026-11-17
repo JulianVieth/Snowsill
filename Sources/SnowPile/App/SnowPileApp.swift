@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -67,6 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let out = env["SNOWPILE_SNAPSHOT_OUT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             exit(SnapshotRunner.run(scenarioName: scenario, outputDirectory: out, debug: env["SNOWPILE_DEBUG"] == "1"))
         }
+        if let action = env["SNOWPILE_LOGIN_ITEM"] {
+            exit(LoginItemCheck.run(action))
+        }
         NSApp.setActivationPolicy(.accessory)
         overlay.start()
     }
@@ -77,5 +81,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func shakeOff() {
         overlay.shakeOff()
+    }
+}
+
+/// Hidden check for the login item, since it only works from the bundle: `SNOWPILE_LOGIN_ITEM=status|on|off`.
+enum LoginItemCheck {
+    static func run(_ action: String) -> Int32 {
+        let service = SMAppService.mainApp
+        do {
+            switch action {
+            case "on": try service.register()
+            case "off": try service.unregister()
+            default: break
+            }
+        } catch {
+            print("Fehler: \(error.localizedDescription)")
+            return 1
+        }
+        let names: [SMAppService.Status: String] = [
+            .notRegistered: "nicht registriert", .enabled: "aktiv", .requiresApproval: "wartet auf Freigabe", .notFound: "nicht gefunden",
+        ]
+        print("Login-Objekt: \(names[service.status] ?? "unbekannt")")
+        return 0
     }
 }

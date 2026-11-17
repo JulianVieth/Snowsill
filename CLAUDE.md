@@ -17,8 +17,11 @@ swift build                 # nach JEDER Änderung ausführen, Fehler sofort beh
 swift test                  # Logik-Tests
 swift run SnowPile          # starten (Beenden über das Menüleisten-Icon)
 ./scripts/bundle.sh         # baut SnowPile.app (nötig für Launch at Login)
-SNOWPILE_SNAPSHOT=drag swift run SnowPile   # Snapshot-Modus, Szenarien: drag, close, ground
+SNOWPILE_SNAPSHOT=drag swift run SnowPile   # Snapshot-Modus, Szenarien siehe unten
+SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile   # Login-Objekt prüfen (status|on|off), nur im Bundle
 ```
+
+Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind.
 
 Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simulierten Fenstern auf virtueller Uhr ab (fester Seed, schneller als Echtzeit), rendert offscreen und schreibt nach `snapshots/<szenario>/`: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt) und `stats.txt` (Flocken, Pulver, Höhen je Oberfläche). Neue Features bekommen ein eigenes Szenario.
 
