@@ -73,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.setActivationPolicy(.accessory)
         overlay.start()
+        if env["SNOWPILE_SELFTEST"] == "mouse" { overlay.runMouseSelfTest() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

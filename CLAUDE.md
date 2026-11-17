@@ -19,6 +19,7 @@ swift run SnowPile          # starten (Beenden über das Menüleisten-Icon)
 ./scripts/bundle.sh         # baut SnowPile.app (nötig für Launch at Login)
 SNOWPILE_SNAPSHOT=drag swift run SnowPile   # Snapshot-Modus, Szenarien siehe unten
 SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile   # Login-Objekt prüfen (status|on|off), nur im Bundle
+SNOWPILE_SELFTEST=mouse swift run SnowPile   # Mauspfad live prüfen (Hover/Klick-Durchlass, Schneemann bauen), ohne echte Maus-Events
 ```
 
 Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind.
@@ -117,7 +118,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 ## Performance-Ziele
 
 - Unter 5 % CPU bei mittlerer Intensität auf einem M-Chip
-- `preferredFramesPerSecond = 60`, im Akkubetrieb 30
+- Adaptive Bildrate: 60 fps, solange ein Fenster bewegt wird oder die Maus über Schnee ist bzw. eine Kugel zieht, sonst 30 fps; im Akkubetrieb und Stromsparmodus immer 30. Grund: Jeder Frame kostet fest ca. 1 ms CPU pro Bildschirm (Drawable, Submit), unabhängig vom Inhalt. Gemessen: ca. 5,7 % pro Bildschirm bei durchgehend 60 fps, ca. 2,8 % adaptiv.
 - Pausieren bei Bildschirmsperre, Display-Sleep und Bildschirmschoner (`NSWorkspace`- bzw. `DistributedNotificationCenter`-Notifications)
 - Keine Allokationen im Frame-Loop: Flocken kommen aus dem Pool, Instanz-Puffer sind dreifach vorallokiert
 

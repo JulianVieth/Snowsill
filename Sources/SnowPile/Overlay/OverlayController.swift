@@ -138,12 +138,32 @@ final class OverlayController {
         }
     }
 
-    /// 60 fps normally, 30 on battery or in Low Power Mode; paused (and hidden when switched off) otherwise.
+    /// When a window last moved (the tracker delivers every poll while something moves).
+    private var lastWindowActivity: CFTimeInterval = -.infinity
+
+    /// Each frame has a fixed cost of about 1 ms CPU per screen, whatever is drawn. Quiet snowfall moves only
+    /// 2–3 pt per frame at 30 fps, so that is enough; 60 fps only matter where something has to follow quickly:
+    /// a dragged window (its snow must stick to it), a dragged snowball, the cursor over snow.
+    /// On battery or in Low Power Mode it stays at 30.
+    private var desiredFPS: Int {
+        if onBattery || ProcessInfo.processInfo.isLowPowerModeEnabled { return 30 }
+        let windowsMoving = CACurrentMediaTime() - lastWindowActivity < 0.7
+        let mouseOnSnow = dragging != nil || overlays.contains { !$0.window.ignoresMouseEvents }
+        return windowsMoving || mouseOnSnow ? 60 : 30
+    }
+
+    private func updateFrameRate() {
+        let fps = desiredFPS
+        for overlay in overlays where overlay.view.preferredFramesPerSecond != fps {
+            overlay.view.preferredFramesPerSecond = fps
+        }
+    }
+
+    /// Paused (and hidden when switched off) while nobody can see the snow.
     private func updateRunning() {
         let run = shouldRun
-        let fps = onBattery || ProcessInfo.processInfo.isLowPowerModeEnabled ? 30 : 60
+        updateFrameRate()
         for overlay in overlays {
-            overlay.view.preferredFramesPerSecond = fps
             overlay.view.isPaused = !run
             if run {
                 overlay.renderer.resumeClock()
@@ -162,9 +182,12 @@ final class OverlayController {
 
     private func startTracker() {
         tracker.start { [weak self] scan, timestamp in
-            self?.scan = scan
-            self?.scanTimestamp = timestamp
-            self?.applyWindows()
+            guard let self else { return }
+            if scan != self.scan { self.lastWindowActivity = CACurrentMediaTime() }
+            self.scan = scan
+            self.scanTimestamp = timestamp
+            self.applyWindows()
+            self.updateFrameRate()
         }
     }
 
@@ -205,9 +228,13 @@ final class OverlayController {
     }
 
     /// The overlay windows ignore the mouse except while the cursor is over snow that can be grabbed.
+    /// Replaces the real cursor position in the self-test.
+    private var simulatedMouse: NSPoint?
+
     private func updateHover() {
+        defer { updateFrameRate() }
         guard shouldRun, dragging == nil else { return }
-        let p = cgPoint(NSEvent.mouseLocation)
+        let p = cgPoint(simulatedMouse ?? NSEvent.mouseLocation)
         let blockers = clickBlockers
         var anyInteractive = false
         for overlay in overlays {
@@ -215,7 +242,7 @@ final class OverlayController {
             if overlay.window.ignoresMouseEvents == interactive { overlay.window.ignoresMouseEvents = !interactive }
             anyInteractive = anyInteractive || interactive
         }
-        if anyInteractive { NSCursor.openHand.set() }
+        if anyInteractive && simulatedMouse == nil { NSCursor.openHand.set() }
     }
 
     private func handleMouse(_ index: Int, _ phase: OverlayView.MousePhase, _ appKitPoint: NSPoint) {
@@ -296,5 +323,73 @@ final class OverlayController {
         dragging = nil
         updateRunning()
         applyWindows()
+    }
+
+    // MARK: - Self-test
+
+    /// `SNOWPILE_SELFTEST=mouse`: drives the real mouse path (hover → click-through switch, AppKit → CG conversion,
+    /// grab, roll, drop) with simulated positions on the main screen, since synthetic mouse events need
+    /// Accessibility permission. Prints one line per check and exits with the number of failures.
+    func runMouseSelfTest() {
+        Task { @MainActor in
+            func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9)) }
+            var failures = 0
+            func check(_ ok: Bool, _ text: String) {
+                print((ok ? "OK      " : "FEHLER  ") + text)
+                if !ok { failures += 1 }
+            }
+            await wait(1.5)
+            guard let main = overlays.first, let screen = NSScreen.screens.first else {
+                print("FEHLER  kein Overlay"); exit(1)
+            }
+            main.renderer.withSimulation { $0.fillGround(height: 30) }
+            // A spot on the ground that no window covers (AppKit: x, y from the bottom of the main screen).
+            let blockers = clickBlockers
+            let height = screen.frame.height
+            func free(_ x: CGFloat) -> Bool { !blockers.contains { $0.contains(CGPoint(x: x, y: height - 8)) } }
+            let candidates = stride(from: CGFloat(80), to: screen.frame.width - 80, by: 10).filter { x in
+                (0...20).allSatisfy { free(x + CGFloat($0) * 20 - 200) }
+            }
+            guard let x = candidates.first(where: { $0 > 300 }) ?? candidates.first else {
+                print("FEHLER  kein freier Bodenstreifen auf dem Hauptbildschirm (Fenster schließen?)"); exit(1)
+            }
+
+            simulatedMouse = NSPoint(x: x, y: 8)
+            updateHover()
+            check(!main.window.ignoresMouseEvents, "Über Bodenschnee nimmt das Overlay Klicks an")
+            simulatedMouse = NSPoint(x: x, y: height / 2)
+            updateHover()
+            check(main.window.ignoresMouseEvents, "In der Luft gehen Klicks durch")
+            if let window = scan.windows.first(where: { !$0.isWidget && $0.bounds.maxY < height }) {
+                let inside = NSPoint(x: window.bounds.midX, y: height - window.bounds.midY)
+                simulatedMouse = inside
+                updateHover()
+                check(main.window.ignoresMouseEvents, "Über einem Fenster gehen Klicks durch")
+            }
+
+            // Three balls, big to small, stacked at x.
+            for (index, distance) in [CGFloat(520), 280, 130].enumerated() {
+                let start = x - 200
+                handleMouse(0, .down, NSPoint(x: start, y: 6))
+                check(dragging == 0, "Kugel \(index + 1) gegriffen")
+                var px = start
+                while px < start + distance {
+                    px += 6
+                    handleMouse(0, .dragged, NSPoint(x: min(px, x + 200), y: 4))
+                    await wait(1.0 / 120)
+                }
+                handleMouse(0, .dragged, NSPoint(x: x + CGFloat(index), y: 300))
+                handleMouse(0, .up, NSPoint(x: x + CGFloat(index), y: 300))
+                check(dragging == nil, "Kugel \(index + 1) losgelassen")
+                await wait(1.2)
+            }
+            var stacks: [SnowStack] = []
+            main.renderer.withSimulation { stacks = $0.stacks }
+            check(stacks.contains { $0.isSnowman && abs($0.x - x) < 4 }, "Schneemann steht bei x \(Int(x)) (\(stacks.map(\.volumes.count)))")
+            simulatedMouse = nil
+            print("Selbsttest beendet, Fehler: \(failures)")
+            await wait(6)
+            exit(Int32(failures))
+        }
     }
 }
