@@ -20,7 +20,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets, wind, icons]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets, wind, icons, carry]
 
     private static let pid: Int32 = 4242
 
@@ -235,6 +235,46 @@ struct SnapshotScenario {
         },
         focus: { _, _ in CGRect(x: 1100, y: 20, width: 340, height: 420) }
     )
+
+    /// Builds a snowman on the ground, then grabs its bottom ball and carries the whole snowman onto a window.
+    static let carry: SnapshotScenario = {
+        let window = CGRect(x: 760, y: 380, width: 520, height: 300)
+        let rolls: [(t: Double, from: CGFloat, to: CGFloat, drop: CGPoint)] = [
+            (1, 60, 560, CGPoint(x: 300, y: 700)),
+            (5, 60, 300, CGPoint(x: 300, y: 520)),
+            (9, 580, 700, CGPoint(x: 302, y: 420)),
+        ]
+        return SnapshotScenario(
+            name: "carry",
+            summary: "Schneemann am Boden bauen, ab 14 s an der unteren Kugel packen und aufs Fenster tragen",
+            duration: 20,
+            captures: [13.5, 14.8, 15.6, 16.6, 20],
+            windows: { _ in [WindowInfo(number: 5, ownerPID: pid, bounds: window)] },
+            focus: { _, _ in CGRect(x: 200, y: 200, width: 1100, height: 700) },
+            prepare: { $0.fillGround(height: 30) },
+            mouse: { t in
+                let ground: CGFloat = 900 - 12
+                for roll in rolls where t >= roll.t && t < roll.t + 3.2 {
+                    let u = t - roll.t
+                    if u < 2 { return (CGPoint(x: roll.from + (roll.to - roll.from) * CGFloat(u / 2), y: ground), true) }
+                    if u < 3 {
+                        let k = CGFloat(u - 2)
+                        return (CGPoint(x: roll.to + (roll.drop.x - roll.to) * k, y: ground + (roll.drop.y - ground) * k), true)
+                    }
+                    return (roll.drop, false)
+                }
+                // Grab the bottom ball (just above the ground snow) and carry the snowman over the window.
+                if t >= 14 && t < 16.4 {
+                    let k = CGFloat(min(max((t - 14.3) / 1.8, 0), 1))
+                    let start = CGPoint(x: 300, y: 845)
+                    let end = CGPoint(x: 1020, y: 250)
+                    return (CGPoint(x: start.x + (end.x - start.x) * k, y: start.y + (end.y - start.y) * k), true)
+                }
+                if t >= 16.4 && t < 16.5 { return (CGPoint(x: 1020, y: 250), false) }
+                return nil
+            }
+        )
+    }()
 
     /// Only the ground, to judge how the drift builds up over time.
     static let ground = SnapshotScenario(

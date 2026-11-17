@@ -53,13 +53,27 @@ public struct SnowStack: Sendable, Equatable {
     }
 }
 
-/// The ball being rolled or carried with the mouse.
+/// The ball being rolled or carried with the mouse, possibly with more balls on it (a whole snowman).
 public struct HeldBall: Sendable, Equatable {
+    /// Volume of the ball held at the cursor (the bottom one when carrying a stack).
     public internal(set) var volume: CGFloat
+    /// Center of that ball.
     public internal(set) var center: CGPoint
     public var radius: CGFloat { SnowStack.radius(volume: volume) }
-    /// Whether it touches the ground snow and is rolling (as opposed to being carried in the air).
+    /// Whether it touches snow and is rolling (as opposed to being carried in the air).
     public internal(set) var isRolling: Bool
+    /// Balls stacked on top when a whole stack is carried. A stack is only carried, never rolled.
+    public internal(set) var above: [CGFloat] = []
+
+    public var balls: Int { 1 + above.count }
+    public var volumes: [CGFloat] { [volume] + above }
+    public var totalVolume: CGFloat { volumes.reduce(0, +) }
+
+    /// The held balls as a stack standing where they are, for drawing.
+    public var asStack: SnowStack {
+        SnowStack(id: 0, volumes: volumes, x: center.x, bottomY: center.y + radius * SnowStack.sink,
+                  support: .falling(velocity: 0, shatters: false))
+    }
 }
 
 extension SnowSimulation {
@@ -122,7 +136,17 @@ extension SnowSimulation {
         // Topmost stack first (a stack in front of the snow).
         if let index = stacks.lastIndex(where: { !$0.isHidden && $0.contains(p, padding: 2) }) {
             var stack = stacks[index]
-            let center = stack.centers.last ?? p
+            let centers = stack.centers, radii = stack.radii
+            // Which ball was hit: the one whose center is closest relative to its size.
+            let hit = centers.indices.min { hypot(p.x - centers[$0].x, p.y - centers[$0].y) / radii[$0]
+                < hypot(p.x - centers[$1].x, p.y - centers[$1].y) / radii[$1] } ?? centers.count - 1
+            if hit == 0 && stack.volumes.count > 1 {
+                // The bottom ball: the whole stack (a snowman) comes along.
+                held = HeldBall(volume: stack.volumes[0], center: centers[0], isRolling: false, above: Array(stack.volumes.dropFirst()))
+                stacks.remove(at: index)
+                return true
+            }
+            let center = centers.last ?? p
             let volume = stack.volumes.removeLast()
             held = HeldBall(volume: volume, center: center, isRolling: false)
             if stack.volumes.isEmpty { stacks.remove(at: index) } else { stacks[index] = stack }
@@ -153,14 +177,15 @@ extension SnowSimulation {
             // Can't push the ball into the snow; close to it, it rolls on it.
             rolling = true
             let from = ball.center.x
-            if abs(x - from) > 0, ball.volume < Self.maxBallVolume {
+            // A carried snowman just slides over the snow; only a single ball rolls and grows.
+            if ball.above.isEmpty, abs(x - from) > 0, ball.volume < Self.maxBallVolume {
                 ball.volume += pickUp(surface: s, from: from, to: x, radius: r, limit: Self.maxBallVolume - ball.volume)
             }
             // Stays on top of the (now lower) snow as it grows.
             y = surfaces[s].topY(atColumn: c) - ball.radius
         }
         ball.center = CGPoint(x: x, y: y)
-        ball.isRolling = rolling
+        ball.isRolling = rolling && ball.above.isEmpty
         held = ball
     }
 
@@ -170,7 +195,7 @@ extension SnowSimulation {
         held = nil
         let r = ball.radius
         let stack = SnowStack(
-            id: nextStackID, volumes: [ball.volume], x: ball.center.x, bottomY: ball.center.y + r * SnowStack.sink,
+            id: nextStackID, volumes: ball.volumes, x: ball.center.x, bottomY: ball.center.y + r * SnowStack.sink,
             support: .falling(velocity: 0, shatters: false)
         )
         nextStackID += 1
@@ -198,8 +223,7 @@ extension SnowSimulation {
     public mutating func shatterStacks(near p: CGPoint) -> Bool {
         if let ball = held, hypot(ball.center.x - p.x, ball.center.y - p.y) <= ball.radius + 6 {
             held = nil
-            shatter(SnowStack(id: 0, volumes: [ball.volume], x: ball.center.x, bottomY: ball.center.y + ball.radius,
-                              support: .ground), at: ball.center.y + ball.radius)
+            shatter(ball.asStack, at: ball.center.y + ball.radius)
         }
         var hit: [SnowStack] = []
         stacks.removeAll { stack in

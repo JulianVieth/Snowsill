@@ -22,7 +22,7 @@ SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile   # Login-Objekt
 SNOWPILE_SELFTEST=mouse swift run SnowPile   # Mauspfad live prüfen (Hover/Klick-Durchlass, Schneemann bauen), ohne echte Maus-Events
 ```
 
-Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind, icons.
+Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind, icons, carry (Schneemann auf ein Fenster tragen).
 
 Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simulierten Fenstern auf virtueller Uhr ab (fester Seed, schneller als Echtzeit), rendert offscreen und schreibt nach `snapshots/<szenario>/`: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt) und `stats.txt` (Flocken, Pulver, Höhen je Oberfläche). Neue Features bekommen ein eigenes Szenario.
 
@@ -90,7 +90,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 ### Schneekugeln und Schneemänner
 - Über Schnee mit genug Höhe (Boden, Fensterkappe, Widget, Icon) wird der Cursor zur Hand. Ziehen rollt eine Kugel auf der Fläche darunter: Sie wächst mit der zurückgelegten Strecke und nimmt das Volumen aus den überrollten Heightmap-Spalten auf (Volumen bleibt erhalten, ohne Schnee wächst sie nicht). Die Kappe liegt über der Fensteroberkante, Klicks ins Fenster bleiben unberührt.
 - Doppelklick auf eine Kugel oder einen Schneemann lässt ihn zu Klumpen und Pulver zerplatzen (Volumen bleibt erhalten).
-- Loslassen: Die Kugel fällt auf die Oberfläche darunter (Boden oder Fensteroberkante) und bleibt liegen. Kugeln lassen sich erneut greifen und verschieben.
+- Loslassen: Die Kugel fällt auf die Oberfläche darunter (Boden oder Fensteroberkante) und bleibt liegen. Kugeln lassen sich erneut greifen und verschieben. Wer die unterste Kugel eines Stapels greift, trägt den ganzen Stapel bzw. Schneemann (er rollt dabei nicht und wächst nicht); wer eine obere greift, nimmt die oberste ab.
 - Wird eine kleinere Kugel auf eine größere gesetzt, wird sie gestapelt. Bei drei Kugeln ist der Schneemann fertig und bekommt Kohleaugen, Karottennase, Knopfreihe, Zweigarme und Hut.
 - Auf Fenstern wandern Kugeln und Schneemänner mit dem Fenster mit. Wird das Fenster geschlossen oder verschwindet die Fläche unter ihnen, fallen sie herunter und zerplatzen zu Klumpen und Pulver.
 - Logik (Kugelwachstum, Stapeln, Auflageflächen) in `SnowPileCore`, getestet. Gezeichnet prozedural im Shader (Kreise mit Schattierung), keine Bilddateien.

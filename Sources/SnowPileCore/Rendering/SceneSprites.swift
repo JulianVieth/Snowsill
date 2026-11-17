@@ -15,7 +15,7 @@ public enum SceneSprites {
             writeStack(stack, offset: offset, into: &writer)
         }
         if let ball = simulation.held {
-            writer.add(.ball, at: ball.center, size: CGSize(width: ball.radius, height: ball.radius), seed: 0.37)
+            writeStack(ball.asStack, offset: .zero, into: &writer)
         }
     }
 

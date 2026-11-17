@@ -27,7 +27,7 @@ import Testing
         s.surfaces.reduce(0) { $0 + $1.totalVolume }
             + s.flakes.filter(\.isActive).reduce(0) { $0 + $1.snowVolume }
             + s.stacks.reduce(0) { $0 + $1.totalVolume }
-            + (s.held?.volume ?? 0)
+            + (s.held?.totalVolume ?? 0)
     }
 
     func run(_ s: inout SnowSimulation, seconds: Double) {
@@ -229,6 +229,60 @@ import Testing
         s.setWindows([window], timestamp: 2)
         run(&s, seconds: 0.1)
         #expect(try !#require(s.stacks.first).isHidden)
+    }
+
+    // MARK: - Moving a whole snowman
+
+    func buildSnowman(_ s: inout SnowSimulation, at x: CGFloat) throws -> SnowStack {
+        makeBall(&s, at: 50, distance: 500, dropAt: x, dropY: 650)
+        makeBall(&s, at: 50, distance: 250, dropAt: x, dropY: 300)
+        makeBall(&s, at: 50, distance: 100, dropAt: x + 2, dropY: 200)
+        let snowman = try #require(s.stacks.first { $0.isSnowman })
+        return snowman
+    }
+
+    @Test func grabbingTheBottomBallCarriesTheWholeSnowmanOntoAWindow() throws {
+        var s = sim(groundHeight: 30)
+        let snowman = try buildSnowman(&s, at: 150)
+        let before = total(s)
+        s.setWindows([window], timestamp: 0)
+        let grabbed = s.beginGrab(at: snowman.centers[0], windows: [window.bounds])
+        #expect(grabbed)
+        #expect(s.stacks.isEmpty)
+        #expect(try #require(s.held).balls == snowman.volumes.count)
+        // Carry it over the window (top edge y 400) and let go.
+        for x in stride(from: CGFloat(150), through: 500, by: 10) { s.moveGrab(to: CGPoint(x: x, y: 250)) }
+        // Carried, not rolled: it didn't grow.
+        #expect(try #require(s.held).volumes == snowman.volumes)
+        s.endGrab()
+        run(&s, seconds: 2)
+        let moved = try #require(s.stacks.first)
+        #expect(moved.volumes == snowman.volumes)
+        guard case .window(7, _) = moved.support else { Issue.record("not on the window: \(moved.support)"); return }
+        #expect(abs(moved.x - 500) < 1)
+        #expect(abs(total(s) - before) < 1e-6)
+    }
+
+    @Test func grabbingTheHeadStillTakesOnlyTheHead() throws {
+        var s = sim(groundHeight: 30)
+        let snowman = try buildSnowman(&s, at: 600)
+        let grabbed = s.beginGrab(at: snowman.centers[2], windows: [])
+        #expect(grabbed)
+        #expect(try #require(s.held).balls == 1)
+        #expect(s.stacks.first?.volumes.count == 2)
+    }
+
+    @Test func aCarriedSnowmanNeverLandsOnAnotherStack() throws {
+        var s = sim(groundHeight: 30)
+        let snowman = try buildSnowman(&s, at: 200)
+        makeBall(&s, at: 600, distance: 300, dropAt: 700, dropY: 600)
+        let grabbed = s.beginGrab(at: snowman.centers[0], windows: [])
+        #expect(grabbed)
+        s.moveGrab(to: CGPoint(x: 700, y: 300))
+        s.endGrab()
+        run(&s, seconds: 2)
+        #expect(s.stacks.count == 2)
+        #expect(s.stacks.contains { $0.isSnowman && $0.support == .ground })
     }
 
     // MARK: - Rolling on windows
