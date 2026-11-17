@@ -10,6 +10,8 @@ import Testing
     func config(spawnRate: Double = 0) -> SnowConfig {
         var config = SnowConfig()
         config.spawnRate = spawnRate
+        config.meltRate = 0
+        config.windStrength = 0
         return config
     }
 

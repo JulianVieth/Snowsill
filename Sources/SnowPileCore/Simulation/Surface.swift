@@ -37,6 +37,8 @@ public struct Surface: Sendable {
     public private(set) var geometryVersion = 0
     /// Ends cut off by the screen edge (a window reaching onto the next screen) hold their snow like walls,
     /// since the window continues there.
+    /// Simulation time of the last regular snowflake landing here (melting speeds up without new snow).
+    public var lastSnowfall: Double = 0
     public var clippedLeft = false
     public var clippedRight = false
     /// A wall between column `barrier - 1` and `barrier` that snow can't slide across (the plow blade).

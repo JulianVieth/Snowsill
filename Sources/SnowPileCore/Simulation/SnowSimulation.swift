@@ -33,6 +33,11 @@ public struct SnowConfig: Sendable {
     public var meltRate: CGFloat = 0.01
     /// Scales the breeze and gusts; 0 is calm.
     public var windStrength: CGFloat = 1
+    /// Occasional short bursts of heavy snowfall.
+    public var flurriesEnabled = true
+    /// Seconds without new snow after which a surface melts faster.
+    public var meltSpeedupAfter: Double = 25
+    public var meltSpeedup: CGFloat = 3
 
     public var snowmenEnabled = true
     public var iciclesEnabled = true
@@ -127,6 +132,10 @@ public struct SnowSimulation {
 
     /// Horizontal wind speed (pt/s) acting on all particles.
     public internal(set) var windX: CGFloat = 0
+    public internal(set) var wind: Wind
+    private var meltTimer: CGFloat = 0
+    /// Fixed wind for tests.
+    var windOverride: CGFloat?
 
     var tracked: [Int: TrackedWindow] = [:]
     var icicleGroups: [Int: IcicleGroup] = [:]
@@ -141,6 +150,7 @@ public struct SnowSimulation {
         self.bounds = bounds
         self.screenIndex = screenIndex
         self.rng = SplitMix64(seed: seed)
+        wind = Wind(seed: Int(truncatingIfNeeded: seed % 10_000), firstFlurry: Double(seed % 90) + 45)
         let capacity = config.maxFlakes + config.powderCapacity
         flakes = ContiguousArray(repeating: Flake(), count: capacity)
         freeSlots = ContiguousArray((0..<capacity).reversed())
@@ -191,7 +201,9 @@ public struct SnowSimulation {
         let dt = min(rawDt, Self.maxStep)
         time += dt
 
-        spawnAccumulator += config.spawnRate * Double(bounds.width / 1000) * dt
+        wind.step(dt: dt, strength: config.windStrength, flurries: config.flurriesEnabled, rng: &rng)
+        windX = windOverride ?? wind.speed
+        spawnAccumulator += config.spawnRate * Double(bounds.width / 1000) * dt * Double(wind.spawnFactor)
         while spawnAccumulator >= 1 {
             spawnAccumulator -= 1
             spawnSnowfall()
@@ -199,7 +211,8 @@ public struct SnowSimulation {
 
         let t = CGFloat(dt)
         let relax = min(Self.velocityRelaxation * t, 1)
-        let margin: CGFloat = 40
+        // Flakes spawned upwind start beside the screen; they may be out there.
+        let margin: CGFloat = 40 + upwindSpawnReach
         for i in flakes.indices where flakes[i].isActive {
             var flake = flakes[i]
             let previousY = flake.position.y
@@ -230,6 +243,7 @@ public struct SnowSimulation {
             flakes[i] = flake
         }
 
+        stepMelting(dt: t)
         stepPlow(dt: t)
         stepStacks(dt: t)
         stepIcicles(dt: t)
@@ -255,6 +269,7 @@ public struct SnowSimulation {
             guard previousY <= surfaces[s].baseY, flake.position.y >= surfaces[s].topY(atColumn: column) else { continue }
             if flake.kind != .ice {
                 depositSpreading(surface: s, volume: flake.snowVolume, x: x, radius: flake.radius)
+                if flake.kind == .snow { surfaces[s].lastSnowfall = time }
             }
             if flake.kind == .clump {
                 burst(at: CGPoint(x: x, y: surfaces[s].topY(atColumn: column)), radius: flake.radius)
@@ -279,6 +294,19 @@ public struct SnowSimulation {
             if added < remaining {
                 if reach >= fullWidth { if added <= 1e-12 { break } } else { reach *= 2 }
             }
+        }
+    }
+
+    /// Lying snow melts slowly, faster when no new snow has come for a while. Applied in batches to keep
+    /// the per-frame cost and mesh rebuilds down.
+    private mutating func stepMelting(dt: CGFloat) {
+        meltTimer += dt
+        guard meltTimer >= 0.5, config.meltRate > 0 else { return }
+        let elapsed = meltTimer
+        meltTimer = 0
+        for i in surfaces.indices {
+            let idle = time - surfaces[i].lastSnowfall > config.meltSpeedupAfter
+            surfaces[i].melt(depth: config.meltRate * elapsed * (idle ? config.meltSpeedup : 1))
         }
     }
 
@@ -575,11 +603,21 @@ public struct SnowSimulation {
 
     // MARK: - Spawning
 
+    /// How far beside the screen snowfall starts on the windward side, so the wind doesn't leave that side empty:
+    /// roughly the drift during the time a flake needs to fall through the screen.
+    var upwindSpawnReach: CGFloat {
+        let fallTime = bounds.height / 60
+        return min(abs(windX) * fallTime, 800)
+    }
+
     private mutating func spawnSnowfall() {
         guard snowfallCount < config.maxFlakes else { return }
         let radius = CGFloat.random(in: config.radiusRange, using: &rng)
+        let reach = upwindSpawnReach
+        let lower = windX > 0 ? bounds.minX - reach : bounds.minX
+        let upper = windX < 0 ? bounds.maxX + reach : bounds.maxX
         let position = CGPoint(
-            x: CGFloat.random(in: bounds.minX...bounds.maxX, using: &rng),
+            x: CGFloat.random(in: lower...upper, using: &rng),
             y: bounds.minY - radius - CGFloat.random(in: 0...30, using: &rng)
         )
         let drift = CGFloat.random(in: -4...4, using: &rng)
@@ -664,6 +702,10 @@ public struct SnowSimulation {
     /// Puts an even layer of snow on a window, for scenarios.
     public mutating func fillWindow(_ number: Int, height: CGFloat) {
         modifySurface(.window(number: number)) { $0.deposit(volume: CGFloat($0.heights.count) * Surface.columnWidth * height, minX: $0.minX, maxX: $0.maxX) }
+    }
+
+    mutating func spawnOnly(count: Int) {
+        for _ in 0..<count { spawnSnowfall() }
     }
 
     mutating func addTestFlake(at position: CGPoint, volume: CGFloat) {

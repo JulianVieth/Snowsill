@@ -20,7 +20,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets, wind]
 
     private static let pid: Int32 = 4242
 
@@ -202,6 +202,22 @@ struct SnapshotScenario {
         ] },
         focus: { _, _ in CGRect(x: 0, y: 20, width: 700, height: 260) }
     )
+
+    /// Stormy wind with gusts, a flurry around 87–95 s (seed 42), and melting once the snow stops at 100 s.
+    static let wind: SnapshotScenario = {
+        var config = SnowConfig()
+        config.windStrength = 2.4
+        config.meltRate = 0.05
+        return SnapshotScenario(
+            name: "wind",
+            summary: "Stürmischer Wind mit Böen, Flurry ab ca. 87 s, ein Fenster",
+            duration: 96,
+            captures: [20, 50, 80, 86, 89, 91, 93, 96],
+            windows: { _ in [WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: 420, y: 340, width: 600, height: 380))] },
+            focus: { _, _ in CGRect(x: 360, y: 260, width: 720, height: 160) },
+            config: config
+        )
+    }()
 
     /// Only the ground, to judge how the drift builds up over time.
     static let ground = SnapshotScenario(

@@ -313,7 +313,10 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
     /// One line of numbers for the snapshot log: flakes, powder, and snow height per surface.
     func statsLine() -> String {
-        var parts = ["Flocken \(simulation.snowfallCount)", "Pulver \(simulation.activeCount - simulation.snowfallCount)"]
+        var parts = [
+            "Flocken \(simulation.snowfallCount)", "Pulver \(simulation.activeCount - simulation.snowfallCount)",
+            String(format: "Wind %.0f%@", simulation.windX, simulation.wind.isFlurry ? " Flurry" : ""),
+        ]
         for surface in simulation.surfaces {
             let heights = surface.heights
             let maxHeight = heights.max() ?? 0
