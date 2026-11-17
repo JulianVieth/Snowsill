@@ -298,13 +298,13 @@ import Testing
 
     // MARK: - Plow
 
-    @Test func plowStopsInFrontOfASnowman() throws {
+    @Test func plowStopsRightInFrontOfABallAndLeavesNoBlock() throws {
         var c = config()
         c.plowEnabled = true
         c.plowInterval = 8
         c.plowThreshold = 10
         var s = SnowSimulation(config: c, bounds: screen, seed: 5)
-        s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 30_000, minX: 0, maxX: 1000) }
+        s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 20_000, minX: 0, maxX: 1000) }
         makeBall(&s, at: 50, distance: 200, dropAt: 600, dropY: 500)
         let stack = try #require(s.stacks.first)
         let r = try #require(stack.radii.first)
@@ -313,13 +313,13 @@ import Testing
             s.step(dt: 1.0 / 60)
             if s.plow.isActive && s.plow.direction > 0 { closest = min(closest, stack.x - r - s.plow.x) }
         }
+        // Stops close to the ball (leaving room for its short wall), never touching it.
         #expect(closest >= 0)
-        #expect(closest < 300)
-        // The wall it pushed is left in front of the snowman, not under it.
+        #expect(closest < Plow.wallLength + 20)
         let after = try #require(s.stacks.first)
         #expect(abs(after.bottomY - stack.bottomY) < 4)
-        // The snowman is unharmed and the plow turned around and left.
-        #expect(s.stacks.count == 1)
         #expect(!s.plow.isActive)
+        // The wall is left as a pile no higher than a wall, no 50 pt block.
+        #expect(s.surfaces[0].heights.max()! <= Plow.wallHeight + 0.01)
     }
 }

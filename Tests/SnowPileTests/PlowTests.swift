@@ -44,14 +44,43 @@ import Testing
         #expect(s.plow.isActive)
     }
 
-    @Test func conservesVolumeWhileScraping() {
+    @Test func everyBitOfSnowIsAccountedFor() {
         var s = sim(groundHeight: 30)
         let before = s.surfaces[0].totalVolume
         run(&s, seconds: 13)
         #expect(s.plow.phase == .plowing)
-        #expect(s.plow.wallVolume > 0)
-        let total = s.surfaces[0].totalVolume + s.plow.wallVolume + airborne(s)
-        #expect(abs(total - before) < 1e-3, "diff \(total - before)")
+        // Lying, in the air, or pushed aside out of view (like a real plow pushes snow to the roadside).
+        let total = s.surfaces[0].totalVolume + airborne(s) + s.plow.pushedAside
+        #expect(abs(total - before) < 1e-3)
+        #expect(s.plow.pushedAside > 0)
+    }
+
+    @Test func pushesOneWallRightInFrontOfTheBlade() throws {
+        var c = config()
+        c.plowThreshold = 5
+        var s = SnowSimulation(config: c, bounds: screen, seed: 1)
+        s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 1000 * 10, minX: 0, maxX: 1000) }
+        run(&s, seconds: 13)
+        let ground = s.surfaces[0]
+        let blade = try #require(ground.column(at: s.plow.x))
+        // A wall just ahead, higher than the untouched snow, but no flat-topped block.
+        let wall = ground.heights[blade..<min(blade + 15, ground.heights.count)]
+        #expect(wall.max()! > 14)
+        #expect(wall.max()! <= Plow.wallHeight + 0.01)
+        // Further ahead the snow is untouched.
+        let far = try #require(ground.column(at: s.plow.x + 150))
+        #expect(abs(ground.heights[far] - 10) < 0.5)
+    }
+
+    @Test func nothingTrailsBehindTheBlade() throws {
+        var s = sim(groundHeight: 30)
+        for _ in 0..<(60 * 14) {
+            s.step(dt: 1.0 / 60)
+            guard s.plow.phase == .plowing, s.plow.x > 120 else { continue }
+            let ground = s.surfaces[0]
+            let a = try #require(ground.column(at: s.plow.x - 100)), b = try #require(ground.column(at: s.plow.x - 4))
+            #expect(ground.heights[a...b].allSatisfy { $0 < 3 })
+        }
     }
 
     @Test func leavesAThinIrregularLayerBehind() throws {
@@ -60,10 +89,8 @@ import Testing
         let ground = s.surfaces[0]
         let behind = ground.heights.prefix(Int((s.plow.x - 20) / Surface.columnWidth)).dropFirst(5)
         #expect(!behind.isEmpty)
-        // Columns the wall overflow didn't hit stay at the residual height.
-        let residualColumns = behind.filter { $0 < 3 }
-        #expect(Double(residualColumns.count) > Double(behind.count) * 0.8)
-        #expect(Set(residualColumns.map { Int($0 * 10) }).count > 3)
+        #expect(behind.allSatisfy { $0 < 3 })
+        #expect(Set(behind.map { Int($0 * 10) }).count > 3)
     }
 
     @Test func crossesTheScreenAndComesBackLater() {
@@ -71,7 +98,8 @@ import Testing
         run(&s, seconds: 10 + 1000 / 120 + 3)
         #expect(!s.plow.isActive)
         #expect(s.plow.lastRun > 10)
-        #expect(s.surfaces[0].meanHeight < 8)
+        #expect(s.surfaces[0].meanHeight < 4)
+        #expect(s.surfaces[0].heights.max()! < 4)
         // Second run goes the other way once the snow is back.
         s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 30_000, minX: 0, maxX: 1000) }
         run(&s, seconds: 11)

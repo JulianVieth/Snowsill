@@ -49,7 +49,13 @@ public enum SurfaceMesh {
         var sum: CGFloat = 0
         var weight: CGFloat = 0
         // Columns edge-reach ..< edge+reach; edge sits between columns edge-1 and edge.
-        for c in max(edge - reach, 0)..<min(edge + reach, columns) {
+        // Never across the plow blade: the cleared side and the wall stay sharply apart.
+        var lower = max(edge - reach, 0), upper = min(edge + reach, columns)
+        if let barrier = surface.barrier {
+            if edge >= barrier { lower = max(lower, barrier) } else { upper = min(upper, barrier) }
+        }
+        guard lower < upper else { return 0 }
+        for c in lower..<upper {
             guard !surface.isHidden(c) else { continue }
             let distance = abs(CGFloat(c) + 0.5 - CGFloat(edge))
             let w = CGFloat(reach) + 0.5 - distance

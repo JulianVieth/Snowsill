@@ -125,14 +125,6 @@ public enum SceneSprites {
         // Positions along the vehicle, measured backwards from the blade.
         func at(_ back: CGFloat, _ up: CGFloat) -> CGPoint { CGPoint(x: bx - d * back, y: ground - up) }
 
-        // Wall of snow in front of the blade.
-        let wall = plow.wallShape
-        if wall.height > 0.5 && plow.phase == .plowing {
-            writer.add(.mound, at: CGPoint(x: bx + d * wall.halfWidth * 0.85, y: ground - wall.height / 2),
-                       size: CGSize(width: wall.halfWidth, height: wall.height / 2),
-                       seed: CGFloat(plow.run % 7) * 0.13)
-        }
-
         let raised: CGFloat = plow.phase == .leaving ? 6 : 0
         // Arm from body to blade.
         writer.add(.rect, at: at(8, 9 + raised / 2), size: CGSize(width: 6, height: 2), color: steel)

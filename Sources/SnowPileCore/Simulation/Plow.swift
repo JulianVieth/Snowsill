@@ -1,44 +1,40 @@
 import CoreGraphics
 
 /// A little snow plow that crosses the screen bottom now and then, so the ground layer doesn't turn into a
-/// uniform block. The snow in front of the blade is collected into a wall (volume taken from the columns),
-/// a thin, irregular layer stays behind. At the screen edge the wall is pushed out and thrown off as clumps.
+/// uniform block. It scrapes the snow down to a thin, irregular layer and pushes it ahead as a wall: part of the
+/// ground's heightmap right in front of the blade, so there is one mass with a natural slope. The blade is a wall
+/// for the sandpile rule, nothing slides back behind it. What doesn't fit into the wall is pushed aside, out of
+/// view, like a real plow pushes snow to the roadside; at the screen edge it flies off as clumps.
 public struct Plow: Sendable {
     public enum Phase: Sendable, Equatable {
         case idle
         /// Scraping with the blade down.
         case plowing
-        /// Blade up, heading back out after stopping in front of something built.
+        /// Blade up, backing off after stopping in front of something built.
         case leaving
     }
 
     public static let length: CGFloat = 78
     public static let bladeHeight: CGFloat = 18
+    /// The wall in front of the blade gets at most this high (absolute snow height) ...
+    public static let wallHeight: CGFloat = 28
+    /// ... and reaches at most this far ahead of the blade.
+    public static let wallLength: CGFloat = 60
 
     public internal(set) var phase: Phase = .idle
     /// Front edge of the blade (CG x).
     public internal(set) var x: CGFloat = 0
     /// +1 drives right, -1 drives left.
     public internal(set) var direction: CGFloat = 1
-    /// Snow collected in front of the blade (pt²).
-    public internal(set) var wallVolume: CGFloat = 0
     /// Simulation time of the last finished run.
     public internal(set) var lastRun: Double = 0
+    /// Snow pushed aside out of view in total (pt²), so the books balance.
+    public internal(set) var pushedAside: CGFloat = 0
     var run = 0
 
     public init() {}
 
     public var isActive: Bool { phase != .idle }
-
-    /// Half-ellipse mound in front of the blade that holds `wallVolume`: (height, half width).
-    public var wallShape: (height: CGFloat, halfWidth: CGFloat) {
-        guard wallVolume > 0 else { return (0, 0) }
-        // Area of a half ellipse: pi * a * b / 2, with a = 1.6 b until the height hits its cap.
-        let maxHeight: CGFloat = 30
-        let height = min((2 * wallVolume / (.pi * 1.6)).squareRoot(), maxHeight)
-        let halfWidth = 2 * wallVolume / (.pi * height)
-        return (height, halfWidth)
-    }
 
     /// Height of the thin layer the blade leaves behind at absolute `x`.
     public func residual(at x: CGFloat) -> CGFloat {
@@ -47,9 +43,6 @@ public struct Plow: Sendable {
 }
 
 extension SnowSimulation {
-    /// The widest the wall may get before snow tumbles over its top.
-    static let maxWallVolume: CGFloat = 3200
-
     mutating func stepPlow(dt: CGFloat) {
         guard let g = groundIndex else {
             plow.phase = .idle
@@ -64,20 +57,16 @@ extension SnowSimulation {
             // Alternate sides so both get cleared.
             plow.direction = plow.run % 2 == 1 ? 1 : -1
             plow.x = plow.direction > 0 ? bounds.minX - 4 : bounds.maxX + 4
-            plow.wallVolume = 0
             plow.phase = .plowing
         }
 
-        let step = config.plowSpeed * dt * plow.direction
-        var target = plow.x + step
+        var target = plow.x + config.plowSpeed * dt * plow.direction
 
         if plow.phase == .plowing {
-            // Stop in front of anything built on the ground.
+            // Stop in front of anything built, leaving room for the wall so it ends up before it, not under it.
             var blocked = false
-            // Leaves room for the wall in front of the blade, so it ends up before the obstacle, not under it.
-            let margin: CGFloat = 6 + plow.wallShape.halfWidth * 2
+            let margin = 6 + Plow.wallLength
             for obstacle in groundObstacles() {
-                // Anything ahead of the blade counts; the wall growing never lets it drive through.
                 if plow.direction > 0, obstacle.lowerBound >= plow.x, target > obstacle.lowerBound - margin {
                     target = max(plow.x, obstacle.lowerBound - margin)
                     blocked = true
@@ -87,30 +76,32 @@ extension SnowSimulation {
                 }
             }
 
-            scrape(ground: g, from: plow.x, to: target)
+            let scraped = scrape(ground: g, from: plow.x, to: target)
             plow.x = target
-            // The blade holds back the snow in front of it.
-            let column = Int(((plow.x - surfaces[g].minX) / Surface.columnWidth).rounded())
-            surfaces[g].barrier = (0...surfaces[g].heights.count).contains(column) ? column : nil
-            spillWallIfTooBig(ground: g)
+            // The blade holds back the snow in front of it: a wall between the last scraped and the first wall column.
+            let bladeColumn = Int(((plow.x - surfaces[g].minX) / Surface.columnWidth).rounded(.down))
+            let barrier = plow.direction > 0 ? bladeColumn + 1 : bladeColumn
+            surfaces[g].barrier = (1..<surfaces[g].heights.count).contains(barrier) ? barrier : nil
+            let aside = pushIntoWall(ground: g, volume: scraped)
+            let nearEdge = plow.direction > 0 ? plow.x >= bounds.maxX - 40 : plow.x <= bounds.minX + 40
+            if nearEdge {
+                throwOffScreen(volume: aside)
+            } else {
+                plow.pushedAside += aside
+            }
 
             if blocked {
                 surfaces[g].barrier = nil
-                dumpWall(ground: g)
                 plow.phase = .leaving
                 plow.direction = -plow.direction
-            } else if plow.direction > 0 ? plow.x >= bounds.maxX - 6 : plow.x <= bounds.minX + 6 {
-                throwWallOffScreen()
             }
         } else {
-            surfaces[g].barrier = nil
             plow.x = target
         }
 
         // Done once the whole vehicle has left the screen.
         let rear = plow.x - plow.direction * Plow.length
         if plow.direction > 0 ? rear > bounds.maxX + 8 : rear < bounds.minX - 8 {
-            if plow.phase == .plowing { throwWallOffScreen() }
             surfaces[g].barrier = nil
             plow.phase = .idle
             plow.lastRun = time
@@ -126,69 +117,65 @@ extension SnowSimulation {
         surfaces.firstIndex { if case .ground = $0.kind { return true } else { return false } }
     }
 
-    private mutating func scrape(ground g: Int, from a: CGFloat, to b: CGFloat) {
+    /// Lowers the columns the blade passed to the residual layer. Returns the scraped volume.
+    private mutating func scrape(ground g: Int, from a: CGFloat, to b: CGFloat) -> CGFloat {
         let lower = min(a, b), upper = max(a, b)
-        guard upper > lower else { return }
+        guard upper > lower else { return 0 }
         let surface = surfaces[g]
         let first = max(Int(((lower - surface.minX) / Surface.columnWidth).rounded(.down)), 0)
-        let last = min(Int(((upper - surface.minX) / Surface.columnWidth).rounded(.up)), surface.heights.count - 1)
-        guard first <= last else { return }
+        let last = min(Int(((upper - surface.minX) / Surface.columnWidth).rounded(.down)), surface.heights.count - 1)
+        guard first <= last else { return 0 }
+        var scraped: CGFloat = 0
         for c in first...last {
             let x = surface.minX + (CGFloat(c) + 0.5) * Surface.columnWidth
-            plow.wallVolume += surfaces[g].scrape(column: c, to: plow.residual(at: x))
+            scraped += surfaces[g].scrape(column: c, to: plow.residual(at: x))
         }
+        return scraped
     }
 
-    /// A wall that gets too big pushes the excess ahead of itself onto the ground, where the blade meets it again.
-    private mutating func spillWallIfTooBig(ground g: Int) {
-        let excess = plow.wallVolume - Self.maxWallVolume
-        guard excess > 0 else { return }
-        let front = plow.x + plow.direction * plow.wallShape.halfWidth * 2
-        let far = front + plow.direction * 40
-        // Never onto (or under) a snowman: then the wall just grows.
-        let range = min(front, far)...max(front, far)
-        guard !groundObstacles().contains(where: { $0.overlaps(range) }) else { return }
-        let added = surfaces[g].deposit(volume: excess, minX: min(front, far), maxX: max(front, far))
-        plow.wallVolume -= added
+    /// Adds scraped snow to the wall: fills the columns right ahead of the blade up to the wall height, nearest
+    /// first, at most `wallLength` ahead. Returns what didn't fit (it goes aside).
+    private mutating func pushIntoWall(ground g: Int, volume: CGFloat) -> CGFloat {
+        guard volume > 0 else { return 0 }
+        let blade = Int(((plow.x - surfaces[g].minX) / Surface.columnWidth).rounded(.down))
+        var remaining = volume
+        let reach = Int(Plow.wallLength / Surface.columnWidth)
+        let step = plow.direction > 0 ? 1 : -1
+        // The column the blade stands in was just scraped; the wall starts next to it.
+        var c = blade + step
+        var filled = 0
+        while remaining > 1e-9, filled < reach, surfaces[g].heights.indices.contains(c) {
+            // A wedge: highest at the blade, lower further ahead, so the sandpile shapes a natural front.
+            let cap = Plow.wallHeight * (1 - 0.5 * CGFloat(filled) / CGFloat(reach))
+            let room = (cap - surfaces[g].heights[c]) * Surface.columnWidth
+            if room > 0 {
+                let x = surfaces[g].minX + CGFloat(c) * Surface.columnWidth
+                remaining -= surfaces[g].deposit(volume: min(room, remaining), minX: x, maxX: x + Surface.columnWidth)
+            }
+            c += step
+            filled += 1
+        }
+        return max(remaining, 0)
     }
 
-    /// Pushes the wall over the screen edge: it is thrown off as clumps that leave the screen.
-    private mutating func throwWallOffScreen() {
-        let edgeX = plow.direction > 0 ? bounds.maxX : bounds.minX
-        var budget = 60
-        while plow.wallVolume > 1e-6, budget > 0 {
+    /// At the screen edge the snow that goes aside flies off as clumps (it leaves the screen).
+    private mutating func throwOffScreen(volume: CGFloat) {
+        var remaining = volume
+        var budget = 6
+        while remaining > 1e-6, budget > 0 {
             budget -= 1
-            let volume = min(CGFloat.random(in: config.clumpVolumeRange, using: &rng) * 2, plow.wallVolume)
-            let x = edgeX - plow.direction * CGFloat.random(in: 0...20, using: &rng)
+            let piece = min(CGFloat.random(in: config.clumpVolumeRange, using: &rng) * 2, remaining)
+            let x = plow.x + plow.direction * CGFloat.random(in: 2...12, using: &rng)
             let top = groundTop(at: x) ?? bounds.maxY
-            let position = CGPoint(x: x, y: top - CGFloat.random(in: 4...16, using: &rng))
+            let position = CGPoint(x: x, y: top - CGFloat.random(in: 4...14, using: &rng))
             let velocity = CGVector(dx: plow.direction * CGFloat.random(in: 160...320, using: &rng),
                                     dy: CGFloat.random(in: -160 ... -60, using: &rng))
             // Keeps flying outward so it really leaves the screen.
-            guard spawnThrownClump(at: position, volume: volume, velocity: velocity, driftX: plow.direction * 140) else { break }
-            plow.wallVolume -= volume
+            guard spawnThrownClump(at: position, volume: piece, velocity: velocity, driftX: plow.direction * 140) else { break }
+            remaining -= piece
         }
-        // Whatever didn't fit into the pool is pushed out of sight as well.
-        plow.wallVolume = 0
-    }
-
-    /// Leaves the wall as a heap right where the plow stopped.
-    private mutating func dumpWall(ground g: Int) {
-        let shape = plow.wallShape
-        let width = max(shape.halfWidth * 2, 12)
-        let a = plow.x, b = plow.x + plow.direction * width
-        let added = surfaces[g].deposit(volume: plow.wallVolume, minX: min(a, b), maxX: max(a, b))
-        plow.wallVolume -= added
-        // Columns at their maximum: the rest goes down as clumps nearby.
-        var budget = 40
-        while plow.wallVolume > 1e-6, budget > 0 {
-            budget -= 1
-            let volume = min(CGFloat.random(in: config.clumpVolumeRange, using: &rng), plow.wallVolume)
-            let position = CGPoint(x: plow.x - plow.direction * CGFloat.random(in: 0...60, using: &rng), y: bounds.maxY - 60)
-            guard spawnThrownClump(at: position, volume: volume, velocity: CGVector(dx: 0, dy: 0)) else { break }
-            plow.wallVolume -= volume
-        }
-        plow.wallVolume = 0
+        // Whatever didn't make it into a clump is pushed out of sight as well.
+        plow.pushedAside += remaining
     }
 
     @discardableResult

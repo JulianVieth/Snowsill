@@ -97,8 +97,8 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 
 ### Schneeschaufler
 - Ein kleines Räumfahrzeug fährt regelmäßig am Bildschirmboden von einer Seite zur anderen, damit die Bodenschicht nicht zu einem gleichmäßigen Block wird. Es kommt, wenn die mittlere Bodenhöhe einen Schwellwert überschreitet, frühestens alle paar Minuten.
-- Vor der Schaufel sammelt sich Schnee als Wall (aus den Spalten entnommen, Volumen bleibt erhalten), dahinter bleibt eine dünne, unregelmäßige Restschicht. Am Bildschirmrand wird der Wall hinausgeschoben bzw. als Klumpen weggeschleudert.
-- Schneemänner am Boden umfährt bzw. überspringt es nicht: Es hält davor an oder fährt nur bis dorthin (keine Zerstörung von Gebautem).
+- Vor der Schaufel sammelt sich Schnee als Wall, dahinter bleibt eine dünne, unregelmäßige Restschicht. Der Wall ist Teil der Boden-Heightmap direkt vor der Schaufel (eine Masse, max. 28 pt hoch und 60 pt lang); die Schaufel ist eine Wand für die Sandpile-Regel und für die Glättung beim Zeichnen, damit nichts nach hinten verschmiert. Was nicht in den Wall passt, schiebt er zur Seite aus dem Bild (`Plow.pushedAside`), wie ein echter Räumer an den Straßenrand; am Bildschirmrand fliegt es als Klumpen hinaus. Bewusste Abweichung von der Volumenerhaltung (2026-11-17, nach Julians Abnahme: ein voll erhaltener Wall wurde zum Block und zu einer zweiten Masse).
+- Kugeln und Schneemänner am Boden umfährt bzw. überspringt es nicht: Es hält mit Platz für den Wall davor an und setzt zurück (keine Zerstörung von Gebautem).
 - Das Dock liegt über dem Overlay, der Schaufler ist also hinter dem Dock teilweise verdeckt. Das ist in Ordnung.
 
 ### Schnee auf Schreibtisch-Icons und Widgets
