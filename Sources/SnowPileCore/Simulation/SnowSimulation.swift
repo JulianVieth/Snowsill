@@ -11,7 +11,7 @@ public struct SnowConfig: Sendable {
     public var windowMaxHeight: CGFloat = 14
     /// Keeps snow off the rounded window corners.
     public var windowCornerInset: CGFloat = 12
-    public var widgetCornerInset: CGFloat = 20
+    public var widgetCornerInset: CGFloat = 16
     /// Share of a flake's disc area that ends up as lying snow. Tuned so the ground fills in about five minutes.
     public var volumeScale: CGFloat = 0.25
     /// Extra pool slots for powder (snow falling off windows), on top of `maxFlakes`.

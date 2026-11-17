@@ -91,4 +91,19 @@ import Testing
         #expect(!visible.hasHidden)
         #expect(abs(visible.totalVolume - 2000) < 1e-6)
     }
+
+    // MARK: - Widgets
+
+    @Test func widgetsCarrySnowWithRounderCornersAndHideBehindWindows() throws {
+        var sim = SnowSimulation(config: noSnowfall(), bounds: screen, seed: 4)
+        let window = WindowInfo(number: 1, ownerPID: 1, bounds: CGRect(x: 250, y: 100, width: 400, height: 300))
+        let widget = WindowInfo(number: 23, ownerPID: 9, bounds: CGRect(x: 200, y: 150, width: 180, height: 180), isWidget: true)
+        sim.setWindows([window, widget], timestamp: 0)
+        let surface = try #require(sim.surfaces.first { $0.kind == .window(number: 23) })
+        #expect(surface.minX == 200 + SnowConfig().widgetCornerInset)
+        #expect(surface.maxX == 380 - SnowConfig().widgetCornerInset)
+        // The window in front covers the widget's top edge from x 250 on.
+        #expect(!surface.isHidden(surface.column(at: 230)!))
+        #expect(surface.isHidden(surface.column(at: 300)!))
+    }
 }

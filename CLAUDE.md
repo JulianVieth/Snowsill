@@ -93,7 +93,8 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 
 ### Schnee auf Schreibtisch-Icons und Widgets
 - Gewünscht: Schnee bleibt auch auf Schreibtisch-Icons und Widgets liegen.
-- Offen, vor der Umsetzung klären: Die Desktop-Icons sind ein einziges Finder-Fenster ohne Einzelpositionen. Einzelne Icon-Rechtecke gibt es nur über die Accessibility-API (Berechtigung nötig, nur nach Rückfrage). Widgets erst mit `CGWindowList` untersuchen (eigene Fenster mit eigenem Layer?).
+- Widgets (umgesetzt): Jedes Widget ist ein eigenes Fenster von `com.apple.notificationcenterui` auf Layer `kCGDesktopIconWindowLevel + 2`, auch mit `.excludeDesktopElements` in der Liste. Die Fenster sind rundum 8 pt größer als die sichtbare Kachel (`WindowFilter.widgetPadding`). Sie liegen hinter allen normalen Fenstern, tragen Schnee, aber keine Eiszapfen.
+- Desktop-Icons (offen): Die Icons sind ein einziges Finder-Fenster ohne Einzelpositionen. Einzelne Icon-Rechtecke gibt es nur über die Accessibility-API (Berechtigung nötig, nur nach Rückfrage).
 
 ### Fallende Flocken
 - Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500), dazu 2200 Plätze für Pulver, damit auch ein volles Fenster komplett zerstäuben kann, ohne den Schneefall zu unterbrechen

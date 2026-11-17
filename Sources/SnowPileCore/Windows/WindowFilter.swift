@@ -53,6 +53,8 @@ public enum WindowFilter {
         return result
     }
 
+    /// Measured on macOS 26: widget windows are 8 pt larger than their tile on every side.
+    public static let widgetPadding: CGFloat = 8
     static let desktopIconLayer = Int(CGWindowLevelForKey(.desktopIconWindow))
     static let dockLayer = Int(CGWindowLevelForKey(.dockWindow))
 
@@ -70,7 +72,9 @@ public enum WindowFilter {
             if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0 { continue }
             if let widgetPID, pid == widgetPID, layer > desktopIconLayer, layer < desktopIconLayer + 10,
                bounds.width >= minSize.width, bounds.height >= minSize.height {
-                scan.windows.append(WindowInfo(number: number, ownerPID: pid, bounds: bounds, isWidget: true))
+                // The window has a transparent margin around the visible tile; snow belongs on the tile.
+                let tile = bounds.insetBy(dx: widgetPadding, dy: widgetPadding)
+                scan.windows.append(WindowInfo(number: number, ownerPID: pid, bounds: tile, isWidget: true))
             } else if layer > 0, layer < dockLayer {
                 scan.blockers.append(bounds)
             }

@@ -20,7 +20,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets]
 
     private static let pid: Int32 = 4242
 
@@ -187,6 +187,20 @@ struct SnapshotScenario {
         ] },
         focus: { _, _ in CGRect(x: 1710, y: -200, width: 1300, height: 300) },
         prepare: { $0.fillGround(height: 20) }
+    )
+
+    /// Two desktop widgets (like Calendar and Weather) top left, partly behind a window.
+    static let widgets = SnapshotScenario(
+        name: "widgets",
+        summary: "Zwei Schreibtisch-Widgets oben links, das rechte teilweise hinter einem Fenster",
+        duration: 40,
+        captures: [20, 40],
+        windows: { _ in [
+            WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: 300, y: 120, width: 700, height: 420)),
+            WindowInfo(number: 24, ownerPID: pid + 9, bounds: CGRect(x: 188, y: 60, width: 180, height: 180), isWidget: true),
+            WindowInfo(number: 23, ownerPID: pid + 9, bounds: CGRect(x: 8, y: 60, width: 180, height: 180), isWidget: true),
+        ] },
+        focus: { _, _ in CGRect(x: 0, y: 20, width: 700, height: 260) }
     )
 
     /// Only the ground, to judge how the drift builds up over time.

@@ -131,6 +131,14 @@ enum SnapshotRunner {
 
         for window in windows.reversed() {
             let rect = window.bounds
+            if window.isWidget {
+                // Widgets: dark rounded tiles, no title bar.
+                let path = CGPath(roundedRect: rect, cornerWidth: 20, cornerHeight: 20, transform: nil)
+                ctx.addPath(path)
+                ctx.setFillColor(CGColor(srgbRed: 0.08, green: 0.10, blue: 0.16, alpha: 0.9))
+                ctx.fillPath()
+                continue
+            }
             let path = CGPath(roundedRect: rect, cornerWidth: 10, cornerHeight: 10, transform: nil)
             ctx.saveGState()
             ctx.setShadow(offset: CGSize(width: 0, height: 8), blur: 24, color: CGColor(gray: 0, alpha: 0.5))

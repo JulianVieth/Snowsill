@@ -68,6 +68,8 @@ import Testing
         let scan = WindowFilter.scan(list, ownPID: 99, widgetPID: 50)
         #expect(scan.windows.map(\.number) == [3, 4, 24, 23])
         #expect(scan.windows.map(\.isWidget) == [false, false, true, true])
+        // Snow lies on the visible tile, not on the transparent margin around it.
+        #expect(scan.windows[2].bounds == CGRect(x: 196, y: 50, width: 164, height: 164))
     }
 
     @Test func desktopLayerWindowsOfOtherAppsAreNoWidgets() {
