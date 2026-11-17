@@ -59,7 +59,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             let label = NSTextField(labelWithString: "")
             label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .systemRed
-            label.frame = NSRect(x: 12, y: view.bounds.height - 70, width: 900, height: 20)
+            label.frame = NSRect(x: 12, y: view.bounds.height - 280, width: 900, height: 20)
             view.addSubview(label)
             debugLabel = label
         }

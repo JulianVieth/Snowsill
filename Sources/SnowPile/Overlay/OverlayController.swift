@@ -16,7 +16,7 @@ final class OverlayController {
         let renderer: SnowRenderer
     }
 
-    private let settings: Settings
+    private let settings: SnowSettings
     private var overlays: [Overlay] = []
     private var observers: [NSObjectProtocol] = []
     private var distributedObservers: [NSObjectProtocol] = []
@@ -40,7 +40,7 @@ final class OverlayController {
     /// The overlay the mouse is currently dragging in, if any.
     private var dragging: Int?
 
-    init(settings: Settings) {
+    init(settings: SnowSettings) {
         self.settings = settings
     }
 
@@ -168,7 +168,7 @@ final class OverlayController {
         }
     }
 
-    // MARK: - Settings and windows
+    // MARK: - SnowSettings and windows
 
     private func applySettings() {
         let config = settings.snowConfig

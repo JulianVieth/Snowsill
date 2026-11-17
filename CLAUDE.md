@@ -26,7 +26,7 @@ Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simuliert
 
 ```
 Sources/SnowPile/              (executableTarget, AppKit/Metal/SwiftUI)
-  App/          SnowPileApp.swift (MenuBarExtra, Activation Policy .accessory), Settings.swift
+  App/          SnowPileApp.swift (MenuBarExtra, Activation Policy .accessory), SnowSettings.swift
   Overlay/      OverlayWindow.swift (ein Fenster pro Bildschirm), OverlayController.swift
   Windows/      WindowTracker.swift (CGWindowList-Polling)
   Rendering/    SnowRenderer.swift (MTKViewDelegate, Frame-Loop), Shaders.swift (MSL-Quelltext)

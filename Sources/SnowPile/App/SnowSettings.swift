@@ -5,7 +5,7 @@ import SnowPileCore
 
 /// User settings, persisted in `UserDefaults`. Changes are published so the overlay can apply them live.
 @MainActor
-final class Settings: ObservableObject {
+final class SnowSettings: ObservableObject {
     enum Intensity: String, CaseIterable, Identifiable {
         case light, medium, blizzard
         var id: String { rawValue }
