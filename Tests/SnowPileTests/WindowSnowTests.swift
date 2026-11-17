@@ -303,6 +303,63 @@ import Testing
         #expect(abs(sim.surfaces[0].totalVolume + airborneVolume(sim) - 3000) < 1e-6)
     }
 
+    // MARK: - Minimizing
+
+    /// The window list during a minimize animation: the window shrinks toward the Dock, every edge moves.
+    func minimizeFrames() -> [CGRect] {
+        (1...8).map { i in
+            let t = CGFloat(i) / 8
+            let w = 400 * (1 - 0.85 * t), h = 300 * (1 - 0.85 * t)
+            return CGRect(x: 100 + (500 - 100) * t * 0.5, y: 200 + (780 - 200) * t, width: w, height: h)
+        }
+    }
+
+    @Test func minimizingDropsTheSnowLikeClosing() throws {
+        var sim = simWithSnow(3000)
+        sim.setWindows([window], timestamp: 0.5)
+        var t = 0.5
+        var first = true
+        for frame in minimizeFrames() {
+            t += 1.0 / 60
+            sim.setWindows([WindowInfo(number: 42, ownerPID: 10, bounds: frame)], timestamp: t)
+            if first {
+                // Right at the first shrinking step the whole layer falls from where it was.
+                #expect(windowSurface(sim) == nil)
+                let debris = sim.flakes.filter(\.isActive)
+                #expect(abs(airborneVolume(sim) - 3000) < 1e-6)
+                #expect(debris.allSatisfy { $0.position.y <= 200 + 1 && $0.position.y >= 200 - 20 })
+                first = false
+            }
+            // No snow travels down with the animation.
+            #expect(windowSurface(sim) == nil)
+        }
+        sim.setWindows([], timestamp: t + 0.1)
+        // Restored later: an empty cap at the old place.
+        sim.setWindows([window], timestamp: t + 5)
+        #expect(try #require(windowSurface(sim)).totalVolume == 0)
+    }
+
+    @Test func resizingFromACornerIsNoMinimize() throws {
+        var sim = simWithSnow(3000)
+        sim.setWindows([window], timestamp: 0.5)
+        // Top-left corner dragged in: right and bottom edges stay.
+        var w = window
+        w.bounds = CGRect(x: 160, y: 260, width: 340, height: 240)
+        sim.setWindows([w], timestamp: 0.5 + 1.0 / 60)
+        #expect(windowSurface(sim) != nil)
+    }
+
+    @Test func aWindowThatOnlyLooksLikeMinimizingGetsItsSurfaceBack() throws {
+        var sim = simWithSnow(3000)
+        sim.setWindows([window], timestamp: 0.5)
+        let shrunk = WindowInfo(number: 42, ownerPID: 10, bounds: CGRect(x: 150, y: 260, width: 300, height: 200))
+        sim.setWindows([shrunk], timestamp: 0.52)
+        #expect(windowSurface(sim) == nil)
+        // It stays like that (a programmatic resize, not a minimize): after a while it carries snow again.
+        sim.setWindows([shrunk], timestamp: 2.0)
+        #expect(windowSurface(sim) != nil)
+    }
+
     @Test func resetClearsWindowSnow() throws {
         var sim = simWithSnow()
         sim.reset()

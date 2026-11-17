@@ -86,6 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let action = env["SNOWPILE_LOGIN_ITEM"] {
             exit(LoginItemCheck.run(action))
         }
+        // Two instances would snow twice and block each other's clicks (each sees the other's overlay as a floating
+        // window). Happens when the bundle runs and `swift run` starts another one.
+        let own = ProcessInfo.processInfo.processIdentifier
+        if let other = NSWorkspace.shared.runningApplications.first(where: {
+            $0.processIdentifier != own && ($0.bundleIdentifier == "local.snowpile.SnowPile" || $0.localizedName == "SnowPile")
+        }) {
+            print("SnowPile läuft bereits (PID \(other.processIdentifier)). Diese Instanz beendet sich.")
+            exit(0)
+        }
         NSApp.setActivationPolicy(.accessory)
         overlay.start()
         if env["SNOWPILE_SELFTEST"] == "mouse" { overlay.runMouseSelfTest() }

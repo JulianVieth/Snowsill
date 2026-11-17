@@ -231,6 +231,71 @@ import Testing
         #expect(try !#require(s.stacks.first).isHidden)
     }
 
+    // MARK: - Rolling on windows
+
+    @Test func snowOnAWindowCapIsGrabbableAndRollsThere() throws {
+        var s = sim(groundHeight: 0)
+        s.setWindows([window], timestamp: 0)
+        s.fillWindow(7, height: 12)
+        let surface = try #require(s.surfaces.first { $0.kind == .window(number: 7) })
+        let before = total(s)
+        // Just above the window's top edge (y 400), in the snow.
+        #expect(s.canGrab(at: CGPoint(x: 350, y: 395), windows: [window.bounds]))
+        // Inside the window: never.
+        #expect(!s.canGrab(at: CGPoint(x: 350, y: 410), windows: [window.bounds]))
+        let grabbed = s.beginGrab(at: CGPoint(x: 350, y: 395), windows: [window.bounds])
+        #expect(grabbed)
+        let start = try #require(s.held).volume
+        for x in stride(from: 350, through: 650, by: 4) { s.moveGrab(to: CGPoint(x: CGFloat(x), y: 396)) }
+        let ball = try #require(s.held)
+        #expect(ball.isRolling)
+        #expect(ball.volume > start * 3)
+        // It sits on the window's snow, not on the ground.
+        let after = try #require(s.surfaces.first { $0.kind == .window(number: 7) })
+        #expect(ball.center.y + ball.radius <= after.baseY + 0.01)
+        #expect(after.totalVolume < surface.totalVolume)
+        #expect(abs(total(s) - before) < 1e-6)
+    }
+
+    // MARK: - Destroying
+
+    @Test func doubleClickShattersASnowmanAndKeepsTheSnow() throws {
+        var s = sim(groundHeight: 30)
+        makeBall(&s, at: 50, distance: 500, dropAt: 800, dropY: 600)
+        makeBall(&s, at: 50, distance: 250, dropAt: 800, dropY: 300)
+        makeBall(&s, at: 50, distance: 100, dropAt: 802, dropY: 200)
+        let snowman = try #require(s.stacks.first)
+        #expect(snowman.isSnowman)
+        let before = total(s)
+        let shattered = s.shatterStacks(near: snowman.centers[1])
+        #expect(shattered)
+        #expect(s.stacks.isEmpty)
+        #expect(s.flakes.contains { $0.isActive && $0.kind == .clump })
+        run(&s, seconds: 20)
+        #expect(abs(total(s) - before) < 1e-3)
+    }
+
+    @Test func doubleClickAfterTheFirstClickPickedUpTheTopBallStillShattersEverything() throws {
+        var s = sim(groundHeight: 30)
+        makeBall(&s, at: 50, distance: 400, dropAt: 800, dropY: 600)
+        makeBall(&s, at: 50, distance: 150, dropAt: 800, dropY: 300)
+        let top = try #require(s.stacks.first?.centers.last)
+        // First click: grabs the top ball and drops it right away (it is falling back).
+        let grabbed = s.beginGrab(at: top, windows: [])
+        #expect(grabbed)
+        s.endGrab()
+        s.step(dt: 1.0 / 60)
+        let shattered = s.shatterStacks(near: top)
+        #expect(shattered)
+        #expect(s.stacks.isEmpty)
+    }
+
+    @Test func doubleClickOnPlainSnowDoesNothing() {
+        var s = sim(groundHeight: 30)
+        let shattered = s.shatterStacks(near: CGPoint(x: 500, y: 790))
+        #expect(!shattered)
+    }
+
     // MARK: - Plow
 
     @Test func plowStopsInFrontOfASnowman() throws {

@@ -70,15 +70,47 @@ extension SnowSimulation {
 
     // MARK: - Hit testing
 
-    /// What a mouse press at `p` would grab: a ball or snowman, or enough ground snow to start a ball.
-    /// Never anything inside a window (`windows` are all window rects), so clicks on windows always go through.
+    /// The snow surface whose snow is at `p`: a visible column under it, `p` within its snow (or just above).
+    /// When several match, the one whose snow top is closest to `p`.
+    func snowSurface(at p: CGPoint) -> (index: Int, column: Int)? {
+        var best: (index: Int, column: Int, distance: CGFloat)?
+        for s in surfaces.indices {
+            guard let c = surfaces[s].column(at: p.x), !surfaces[s].isHidden(c) else { continue }
+            let top = surfaces[s].topY(atColumn: c)
+            guard p.y >= top - 4, p.y < surfaces[s].baseY else { continue }
+            let distance = abs(p.y - top)
+            if best == nil || distance < best!.distance { best = (s, c, distance) }
+        }
+        return best.map { ($0.index, $0.column) }
+    }
+
+    /// The surface a ball of radius `r` held at `p` rests on: the highest snow top at x that the ball touches
+    /// (within a few points), not counting surfaces whose base is above the cursor.
+    func rollingSurface(at p: CGPoint, radius r: CGFloat) -> Int? {
+        var best: (index: Int, top: CGFloat)?
+        for s in surfaces.indices {
+            guard let c = surfaces[s].column(at: p.x), !surfaces[s].isHidden(c) else { continue }
+            let top = surfaces[s].topY(atColumn: c)
+            // The cursor is above the surface's base (in its snow or over it), and the ball reaches down to the snow.
+            guard p.y <= surfaces[s].baseY, p.y >= top - r - 6 else { continue }
+            if best == nil || top < best!.top { best = (s, top) }
+        }
+        return best?.index
+    }
+
+    static func minGrabHeight(for surface: Surface) -> CGFloat {
+        if case .ground = surface.kind { return minGrabHeight }
+        return 3
+    }
+
+    /// What a mouse press at `p` would grab: a ball or snowman, or enough snow (ground or a window's cap) to start
+    /// a ball. Never anything inside a window (`windows` are all window rects), so clicks on windows always go through.
     public func canGrab(at p: CGPoint, windows: [CGRect]) -> Bool {
         guard config.snowmenEnabled, held == nil else { return held != nil }
         if windows.contains(where: { $0.contains(p) }) { return false }
         if stacks.contains(where: { !$0.isHidden && $0.contains(p, padding: 2) }) { return true }
-        guard let g = groundIndex, let column = surfaces[g].column(at: p.x) else { return false }
-        let height = surfaces[g].heights[column]
-        return height >= Self.minGrabHeight && p.y >= surfaces[g].topY(atColumn: column) - 4 && p.y <= surfaces[g].baseY
+        guard let (s, c) = snowSurface(at: p) else { return false }
+        return surfaces[s].heights[c] >= Self.minGrabHeight(for: surfaces[s])
     }
 
     // MARK: - Grabbing
@@ -87,7 +119,7 @@ extension SnowSimulation {
     @discardableResult
     public mutating func beginGrab(at p: CGPoint, windows: [CGRect]) -> Bool {
         guard held == nil, canGrab(at: p, windows: windows) else { return false }
-        // Topmost stack first (a stack in front of the ground snow).
+        // Topmost stack first (a stack in front of the snow).
         if let index = stacks.lastIndex(where: { !$0.isHidden && $0.contains(p, padding: 2) }) {
             var stack = stacks[index]
             let center = stack.centers.last ?? p
@@ -96,42 +128,36 @@ extension SnowSimulation {
             if stack.volumes.isEmpty { stacks.remove(at: index) } else { stacks[index] = stack }
             return true
         }
-        guard let g = groundIndex else { return false }
-        // Scoop a small starting ball out of the ground snow around the cursor.
+        guard let (s, center) = snowSurface(at: p) else { return false }
+        // Scoop a small starting ball out of the snow around the cursor.
         var taken: CGFloat = 0
         let reach = 6
-        if let center = surfaces[g].column(at: p.x) {
-            for c in max(center - reach, 0)...min(center + reach, surfaces[g].heights.count - 1) where taken < Self.startVolume {
-                taken += surfaces[g].take(column: c, depth: min(3, (Self.startVolume - taken) / Surface.columnWidth))
-            }
+        for c in max(center - reach, 0)...min(center + reach, surfaces[s].heights.count - 1) where taken < Self.startVolume {
+            guard !surfaces[s].isHidden(c) else { continue }
+            taken += surfaces[s].take(column: c, depth: min(3, (Self.startVolume - taken) / Surface.columnWidth))
         }
         guard taken > 0 else { return false }
         let r = SnowStack.radius(volume: taken)
-        let top = groundTop(at: p.x) ?? surfaces[g].baseY
-        held = HeldBall(volume: taken, center: CGPoint(x: p.x, y: min(p.y, top - r)), isRolling: true)
+        held = HeldBall(volume: taken, center: CGPoint(x: p.x, y: min(p.y, surfaces[s].topY(atColumn: center) - r)), isRolling: true)
         return true
     }
 
-    /// Moves the held ball. Touching the ground snow it rolls and picks up the snow along its path.
+    /// Moves the held ball. Touching snow (on the ground or on a window) it rolls and picks up the snow on its path.
     public mutating func moveGrab(to p: CGPoint) {
         guard var ball = held else { return }
         let x = min(max(p.x, bounds.minX), bounds.maxX)
         var y = min(max(p.y, bounds.minY), bounds.maxY)
         var rolling = false
-        if let g = groundIndex, let top = groundTop(at: x) {
-            let r = ball.radius
+        let r = ball.radius
+        if let s = rollingSurface(at: CGPoint(x: x, y: y), radius: r), let c = surfaces[s].column(at: x) {
             // Can't push the ball into the snow; close to it, it rolls on it.
-            if y >= top - r - 6 {
-                y = top - r
-                rolling = true
-                let from = ball.center.x
-                if abs(x - from) > 0, ball.volume < Self.maxBallVolume {
-                    ball.volume += pickUp(ground: g, from: from, to: x, radius: r, limit: Self.maxBallVolume - ball.volume)
-                    let newR = ball.radius
-                    // Stays on top of the (now lower) snow as it grows.
-                    y = (groundTop(at: x) ?? top) - newR
-                }
+            rolling = true
+            let from = ball.center.x
+            if abs(x - from) > 0, ball.volume < Self.maxBallVolume {
+                ball.volume += pickUp(surface: s, from: from, to: x, radius: r, limit: Self.maxBallVolume - ball.volume)
             }
+            // Stays on top of the (now lower) snow as it grows.
+            y = surfaces[s].topY(atColumn: c) - ball.radius
         }
         ball.center = CGPoint(x: x, y: y)
         ball.isRolling = rolling
@@ -152,16 +178,39 @@ extension SnowSimulation {
     }
 
     /// Snow along the rolled path sticks to the ball: a layer per column, deeper for bigger balls.
-    private mutating func pickUp(ground g: Int, from a: CGFloat, to b: CGFloat, radius: CGFloat, limit: CGFloat) -> CGFloat {
-        let surface = surfaces[g]
+    private mutating func pickUp(surface s: Int, from a: CGFloat, to b: CGFloat, radius: CGFloat, limit: CGFloat) -> CGFloat {
+        let surface = surfaces[s]
         guard let ca = surface.column(at: min(max(a, surface.minX), surface.maxX - 0.01)),
               let cb = surface.column(at: min(max(b, surface.minX), surface.maxX - 0.01)), ca != cb else { return 0 }
         let depth = 2.2 + radius * 0.07
         var gained: CGFloat = 0
-        for c in min(ca, cb)...max(ca, cb) where gained < limit {
-            gained += surfaces[g].take(column: c, depth: min(depth, (limit - gained) / Surface.columnWidth))
+        for c in min(ca, cb)...max(ca, cb) where gained < limit && !surface.isHidden(c) {
+            gained += surfaces[s].take(column: c, depth: min(depth, (limit - gained) / Surface.columnWidth))
         }
         return gained
+    }
+
+    // MARK: - Destroying
+
+    /// Double click: the ball or snowman at `p` bursts into clumps and powder (the snow is kept and lands again).
+    /// Also catches a ball that the first click of the double click just picked up and dropped back.
+    @discardableResult
+    public mutating func shatterStacks(near p: CGPoint) -> Bool {
+        if let ball = held, hypot(ball.center.x - p.x, ball.center.y - p.y) <= ball.radius + 6 {
+            held = nil
+            shatter(SnowStack(id: 0, volumes: [ball.volume], x: ball.center.x, bottomY: ball.center.y + ball.radius,
+                              support: .ground), at: ball.center.y + ball.radius)
+        }
+        var hit: [SnowStack] = []
+        stacks.removeAll { stack in
+            guard !stack.isHidden else { return false }
+            var near = stack.contains(p, padding: 6)
+            if case .falling = stack.support, abs(stack.x - p.x) <= (stack.radii.max() ?? 0) + 6 { near = true }
+            if near { hit.append(stack) }
+            return near
+        }
+        for stack in hit { shatter(stack, at: stack.bottomY) }
+        return !hit.isEmpty
     }
 
     // MARK: - Physics
@@ -258,7 +307,7 @@ extension SnowSimulation {
     }
 
     /// A stack that lost its support bursts into clumps and powder where it hits.
-    private mutating func shatter(_ stack: SnowStack, at y: CGFloat) {
+    mutating func shatter(_ stack: SnowStack, at y: CGFloat) {
         let r = stack.radii.max() ?? 4
         spawnDebris(volume: stack.totalVolume, x: (stack.x - r)...(stack.x + r), y: (y - 2 * r)...(y - 2),
                     inheritedVX: 0, outward: 0)

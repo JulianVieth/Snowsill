@@ -142,6 +142,10 @@ public struct SnowSimulation {
 
     var tracked: [Int: TrackedWindow] = [:]
     var icicleGroups: [Int: IcicleGroup] = [:]
+    /// Windows in their minimize animation, with the time their bounds last changed.
+    var minimizing: [Int: Double] = [:]
+    /// A "minimize" whose window then stays put this long was a plain resize after all.
+    static let minimizeSettle: Double = 1.0
     private var nextSurfaceID = 1
 
     /// `screenIndex` names the ground surface; each screen runs its own simulation.
@@ -338,12 +342,39 @@ public struct SnowSimulation {
         var newTracked: [Int: TrackedWindow] = [:]
         for window in windows {
             let previous = tracked[window.number]
-            let surface = existing.removeValue(forKey: window.number)
+            var surface = existing.removeValue(forKey: window.number)
+
+            // A minimizing window carries no snow until it is gone (or turns out to have been a plain resize).
+            if let lastChange = minimizing[window.number] {
+                let changed = previous.map { !Self.isSame(window.bounds, $0.bounds) } ?? true
+                if changed { minimizing[window.number] = timestamp }
+                if changed || timestamp - lastChange < Self.minimizeSettle {
+                    if let surface { powderize(surface) }
+                    newTracked[window.number] = TrackedWindow(
+                        bounds: window.bounds, timestamp: timestamp, columnResidual: 0, isWidget: window.isWidget
+                    )
+                    continue
+                }
+                minimizing[window.number] = nil
+            }
+            if let previous, Self.looksLikeMinimize(from: previous.bounds, to: window.bounds) {
+                // Falls from where it lay, like closing; nothing travels down with the animation.
+                if let old = surface { powderize(old) }
+                dropIcicles(ofWindow: window.number, below: previous.bounds)
+                minimizing[window.number] = timestamp
+                newTracked[window.number] = TrackedWindow(
+                    bounds: window.bounds, timestamp: timestamp, columnResidual: 0, isWidget: window.isWidget
+                )
+                continue
+            }
 
             if var previous, Self.isSame(window.bounds, previous.bounds) {
                 previous.timestamp = timestamp
                 previous.velocity = .zero
                 newTracked[window.number] = previous
+                if surface == nil, let geometry = windowSurfaceGeometry(window.bounds, inset: cornerInset(of: window)) {
+                    surface = makeWindowSurface(window, geometry)
+                }
                 if let surface { updated.append(surface) }
                 continue
             }
@@ -359,13 +390,7 @@ public struct SnowSimulation {
                 updated.append(surface)
             } else {
                 if let surface { powderize(surface) }
-                if let geometry {
-                    updated.append(makeSurface(
-                        kind: .window(number: window.number), minX: geometry.minX, baseY: geometry.baseY,
-                        width: geometry.width, maxHeight: window.isDesktopIcon ? config.iconMaxHeight : config.windowMaxHeight,
-                        edges: .spill
-                    ))
-                }
+                if let geometry { updated.append(makeWindowSurface(window, geometry)) }
             }
             newTracked[window.number] = TrackedWindow(
                 bounds: window.bounds, timestamp: timestamp, columnResidual: residual, velocity: velocity, isWidget: window.isWidget
@@ -373,6 +398,7 @@ public struct SnowSimulation {
         }
 
         for surface in existing.values { powderize(surface) }
+        for number in Array(minimizing.keys) where newTracked[number] == nil { minimizing[number] = nil }
         for i in updated.indices {
             guard case .window(let number) = updated[i].kind, let window = windows.first(where: { $0.number == number }) else { continue }
             let inset = cornerInset(of: window)
@@ -397,6 +423,22 @@ public struct SnowSimulation {
             let visible = Occlusion.visibleSegments(minX: surface.minX, maxX: surface.maxX, y: surface.baseY, occluders: occluders)
             surfaces[s].setVisible(visible)
         }
+    }
+
+    private mutating func makeWindowSurface(_ window: WindowInfo, _ geometry: (minX: CGFloat, baseY: CGFloat, width: CGFloat)) -> Surface {
+        makeSurface(
+            kind: .window(number: window.number), minX: geometry.minX, baseY: geometry.baseY, width: geometry.width,
+            maxHeight: window.isDesktopIcon ? config.iconMaxHeight : config.windowMaxHeight, edges: .spill
+        )
+    }
+
+    /// The minimize animation shrinks the window toward the Dock within a poll or two: it gets smaller, its top
+    /// sinks, and both side edges move. Resizing by hand always keeps one side edge in place.
+    static func looksLikeMinimize(from a: CGRect, to b: CGRect) -> Bool {
+        let shrank = b.width < a.width - 8 && b.height < a.height - 8
+        let topSank = b.minY > a.minY + 8
+        let bothSidesMoved = abs(b.minX - a.minX) > 2 && abs(b.maxX - a.maxX) > 2
+        return shrank && topSank && bothSidesMoved
     }
 
     /// Velocity of a window's top-left corner and when it was measured, so the renderer can predict where the

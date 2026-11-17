@@ -266,12 +266,17 @@ final class OverlayController {
         if anyInteractive && simulatedMouse == nil { NSCursor.openHand.set() }
     }
 
-    private func handleMouse(_ index: Int, _ phase: OverlayView.MousePhase, _ appKitPoint: NSPoint) {
+    private func handleMouse(_ index: Int, _ phase: OverlayView.MousePhase, _ appKitPoint: NSPoint, clicks: Int = 1) {
         guard overlays.indices.contains(index) else { return }
         let renderer = overlays[index].renderer
         let p = cgPoint(appKitPoint)
         switch phase {
         case .down:
+            // Double click on a ball or snowman: it bursts.
+            if clicks >= 2, renderer.shatterStacks(near: p) {
+                dragging = nil
+                return
+            }
             if renderer.beginGrab(at: p, windows: clickBlockers) {
                 dragging = index
                 NSCursor.closedHand.set()
@@ -339,7 +344,7 @@ final class OverlayController {
         }
         // Mouse handlers capture the index, so re-wire them after the order may have changed.
         for (index, overlay) in overlays.enumerated() {
-            overlay.view.onMouse = { [weak self] phase, point in self?.handleMouse(index, phase, point) }
+            overlay.view.onMouse = { [weak self] phase, point, clicks in self?.handleMouse(index, phase, point, clicks: clicks) }
         }
         dragging = nil
         updateRunning()

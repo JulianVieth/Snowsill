@@ -30,7 +30,8 @@ final class OverlayWindow: NSPanel {
 final class OverlayView: MTKView {
     enum MousePhase { case down, dragged, up }
 
-    var onMouse: ((MousePhase, NSPoint) -> Void)?
+    /// Phase, global AppKit point, click count (2 for a double click).
+    var onMouse: ((MousePhase, NSPoint, Int) -> Void)?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -53,6 +54,6 @@ final class OverlayView: MTKView {
     private func forward(_ phase: MousePhase, _ event: NSEvent) {
         guard let window else { return }
         // Global AppKit coordinates.
-        onMouse?(phase, window.convertPoint(toScreen: event.locationInWindow))
+        onMouse?(phase, window.convertPoint(toScreen: event.locationInWindow), event.clickCount)
     }
 }

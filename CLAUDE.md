@@ -79,14 +79,17 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Maximale Höhe: ca. 14 pt auf Fenstern, ca. 50 pt am Boden
 - Schmelzen: langsamer, konstanter Abbau. Etwas schneller, wenn lange kein neuer Schnee kommt.
 - Wird ein Fenster bewegt, wandert sein Schnee als zusammenhängende Masse mit (`Surface.relocate`, spaltengenau, ohne Verlust). Beim Skalieren bleibt er an seiner absoluten Position.
-- Herunter fällt Schnee nur, wo er über eine Kante gerät: bei schnellem seitlichen Ziehen (Trägheit ab ca. 900 pt/s, er rutscht zur hinteren Kante), beim Verkleinern, an der Bildschirmkante und beim Schließen (dann die ganze Schicht)
+- Herunter fällt Schnee nur, wo er über eine Kante gerät: bei schnellem seitlichen Ziehen (Trägheit ab ca. 900 pt/s, er rutscht zur hinteren Kante), beim Verkleinern, an der Bildschirmkante und beim Schließen oder Minimieren (dann die ganze Schicht)
+- Minimieren: Während der Animation meldet `CGWindowList` schrumpfende Rahmen. Erkannt wird es daran, dass das Fenster in einem Schritt kleiner wird, die Oberkante sinkt und beide Seitenkanten sich bewegen (beim Größe-Ändern bleibt eine stehen). Dann fällt der Schnee sofort von seinem Platz, und das Fenster trägt keinen, bis es weg ist oder 1 s still steht.
+- Es läuft immer nur eine Instanz: Zwei würden doppelt schneien und sich gegenseitig die Klicks blockieren.
 - Herabfallender Schnee sind **Klumpen plus etwas Pulver** (wie im snowcat-Referenzvideo): grobe, unregelmäßige Brocken, die beim Aufprall zu Pulver zerstäuben, dazu feines Pulver (1–2 pt), langsamer, stärkeres Pendeln. Jedes Partikel trägt sein Schneevolumen und gibt es beim Landen wieder ab, die Menge bleibt erhalten.
 - Gerendert wird pro Oberfläche ein Triangle-Strip in Metal (weiß, leicht bläulicher Schatten). Die Vertices nur neu bauen, wenn sich die Heightmap geändert hat, höchstens mit 20 Hz.
 - Look (Referenzvideos `*.mp4` im Repo-Root): Fensterkappen dick, bucklig und wolkig mit weichem Schatten statt einer flachen Schicht. Die Bodenschicht hat eine ausgefranste, unregelmäßige Oberkante. Die Unregelmäßigkeit ist rein visuell (deterministisches Rauschen über x), die Heightmap bleibt die Wahrheit.
 - Eiszapfen an den Fensterunterkanten: wachsen langsam, wenn auf dem Fenster länger Schnee liegt, und brechen ab bzw. verschwinden, wenn das Fenster schnell bewegt oder geschlossen wird.
 
 ### Schneekugeln und Schneemänner
-- Über Bodenschnee mit genug Höhe wird der Cursor zur Hand. Ziehen rollt eine Kugel: Sie wächst mit der zurückgelegten Strecke und nimmt das Volumen aus den überrollten Heightmap-Spalten auf (Volumen bleibt erhalten, ohne Schnee wächst sie nicht).
+- Über Schnee mit genug Höhe (Boden, Fensterkappe, Widget, Icon) wird der Cursor zur Hand. Ziehen rollt eine Kugel auf der Fläche darunter: Sie wächst mit der zurückgelegten Strecke und nimmt das Volumen aus den überrollten Heightmap-Spalten auf (Volumen bleibt erhalten, ohne Schnee wächst sie nicht). Die Kappe liegt über der Fensteroberkante, Klicks ins Fenster bleiben unberührt.
+- Doppelklick auf eine Kugel oder einen Schneemann lässt ihn zu Klumpen und Pulver zerplatzen (Volumen bleibt erhalten).
 - Loslassen: Die Kugel fällt auf die Oberfläche darunter (Boden oder Fensteroberkante) und bleibt liegen. Kugeln lassen sich erneut greifen und verschieben.
 - Wird eine kleinere Kugel auf eine größere gesetzt, wird sie gestapelt. Bei drei Kugeln ist der Schneemann fertig und bekommt Kohleaugen, Karottennase, Knopfreihe, Zweigarme und Hut.
 - Auf Fenstern wandern Kugeln und Schneemänner mit dem Fenster mit. Wird das Fenster geschlossen oder verschwindet die Fläche unter ihnen, fallen sie herunter und zerplatzen zu Klumpen und Pulver.

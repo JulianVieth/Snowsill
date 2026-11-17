@@ -121,6 +121,12 @@ extension SnowSimulation {
         }
     }
 
+    /// All icicles of a window fall off (minimizing).
+    mutating func dropIcicles(ofWindow number: Int, below bounds: CGRect) {
+        guard let group = icicleGroups.removeValue(forKey: number) else { return }
+        breakOff(group.icicles, below: bounds)
+    }
+
     private mutating func breakOff(_ icicles: [Icicle], below bounds: CGRect) {
         for icicle in icicles where !icicle.isHidden {
             let position = CGPoint(x: bounds.minX + icicle.offset, y: bounds.maxY + icicle.length / 2)

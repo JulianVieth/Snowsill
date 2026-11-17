@@ -291,6 +291,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     func beginGrab(at p: CGPoint, windows: [CGRect]) -> Bool { simulation.beginGrab(at: p, windows: windows) }
     func moveGrab(to p: CGPoint) { simulation.moveGrab(to: p) }
     func endGrab() { simulation.endGrab() }
+    func shatterStacks(near p: CGPoint) -> Bool { simulation.shatterStacks(near: p) }
 
     /// Direct access for snapshot scenarios that need a prepared state.
     func withSimulation(_ body: (inout SnowSimulation) -> Void) {
