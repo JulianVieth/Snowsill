@@ -131,6 +131,14 @@ enum SnapshotRunner {
 
         for window in windows.reversed() {
             let rect = window.bounds
+            if window.isDesktopIcon {
+                // A plain disk-like icon.
+                let path = CGPath(roundedRect: rect.insetBy(dx: 4, dy: 4), cornerWidth: 8, cornerHeight: 8, transform: nil)
+                ctx.addPath(path)
+                ctx.setFillColor(CGColor(gray: 0.82, alpha: 1))
+                ctx.fillPath()
+                continue
+            }
             if window.isWidget {
                 // Widgets: dark rounded tiles, no title bar.
                 let path = CGPath(roundedRect: rect, cornerWidth: 20, cornerHeight: 20, transform: nil)

@@ -20,7 +20,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets, wind]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary, widgets, wind, icons]
 
     private static let pid: Int32 = 4242
 
@@ -218,6 +218,23 @@ struct SnapshotScenario {
             config: config
         )
     }()
+
+    /// Desktop icons on the right edge (frames as Finder reports them), one partly behind a window.
+    static let icons = SnapshotScenario(
+        name: "icons",
+        summary: "Drei Schreibtisch-Icons rechts, das unterste teilweise hinter einem Fenster",
+        duration: 40,
+        captures: [20, 40],
+        windows: { _ in
+            [WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: 900, y: 300, width: 480, height: 300))]
+                + DesktopIcons.windows(from: [
+                    CGRect(x: 1340, y: 60, width: 64, height: 64),
+                    CGRect(x: 1340, y: 170, width: 64, height: 64),
+                    CGRect(x: 1340, y: 280, width: 64, height: 64),
+                ], ownerPID: pid + 20)
+        },
+        focus: { _, _ in CGRect(x: 1100, y: 20, width: 340, height: 420) }
+    )
 
     /// Only the ground, to judge how the drift builds up over time.
     static let ground = SnapshotScenario(

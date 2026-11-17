@@ -24,6 +24,9 @@ final class OverlayController {
     private var hoverTimer: Timer?
     private var powerTimer: Timer?
     private let tracker = WindowTracker()
+    private let iconReader = DesktopIconReader()
+    private var iconReaderRunning = false
+    private var iconFrames: [CGRect] = []
     private var scan = WindowScan()
     private var scanTimestamp: CFTimeInterval = 0
     /// Last active app other than SnowPile itself, so opening our menu doesn't change which window carries snow.
@@ -93,6 +96,8 @@ final class OverlayController {
     func stop() {
         tracker.stop()
         trackerRunning = false
+        iconReader.stop()
+        iconReaderRunning = false
         hoverTimer?.invalidate()
         powerTimer?.invalidate()
         for observer in observers {
@@ -176,6 +181,19 @@ final class OverlayController {
             trackerRunning = run
             if run { startTracker() } else { tracker.stop() }
         }
+        let readIcons = run && settings.iconsEnabled
+        if readIcons != iconReaderRunning {
+            iconReaderRunning = readIcons
+            if readIcons {
+                iconReader.start { [weak self] frames in
+                    self?.iconFrames = frames
+                    self?.applyWindows()
+                }
+            } else {
+                iconReader.stop()
+                iconFrames = []
+            }
+        }
     }
 
     private var trackerRunning = false
@@ -211,12 +229,15 @@ final class OverlayController {
         if settings.widgetsEnabled {
             windows += scan.windows.filter(\.isWidget)
         }
+        if settings.iconsEnabled {
+            windows += DesktopIcons.windows(from: iconFrames, ownerPID: 0)
+        }
         for overlay in overlays { overlay.renderer.setWindows(windows, timestamp: scanTimestamp) }
     }
 
     /// Everything the overlay must never take a click from: all windows (whatever the mode) and floating panels.
     private var clickBlockers: [CGRect] {
-        scan.windows.map(\.bounds) + scan.blockers
+        scan.windows.map(\.bounds) + scan.blockers + iconFrames
     }
 
     // MARK: - Mouse

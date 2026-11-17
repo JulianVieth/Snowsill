@@ -22,7 +22,7 @@ SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile   # Login-Objekt
 SNOWPILE_SELFTEST=mouse swift run SnowPile   # Mauspfad live prüfen (Hover/Klick-Durchlass, Schneemann bauen), ohne echte Maus-Events
 ```
 
-Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind.
+Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind, icons.
 
 Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simulierten Fenstern auf virtueller Uhr ab (fester Seed, schneller als Echtzeit), rendert offscreen und schreibt nach `snapshots/<szenario>/`: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt) und `stats.txt` (Flocken, Pulver, Höhen je Oberfläche). Neue Features bekommen ein eigenes Szenario.
 
@@ -101,7 +101,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 ### Schnee auf Schreibtisch-Icons und Widgets
 - Gewünscht: Schnee bleibt auch auf Schreibtisch-Icons und Widgets liegen.
 - Widgets (umgesetzt): Jedes Widget ist ein eigenes Fenster von `com.apple.notificationcenterui` auf Layer `kCGDesktopIconWindowLevel + 2`, auch mit `.excludeDesktopElements` in der Liste. Die Fenster sind rundum 8 pt größer als die sichtbare Kachel (`WindowFilter.widgetPadding`). Sie liegen hinter allen normalen Fenstern, tragen Schnee, aber keine Eiszapfen.
-- Desktop-Icons (offen): Die Icons sind ein einziges Finder-Fenster ohne Einzelpositionen. Einzelne Icon-Rechtecke gibt es nur über die Accessibility-API (Berechtigung nötig, nur nach Rückfrage).
+- Desktop-Icons (umgesetzt, freigegeben am 2026-11-17): Die Icons sind ein einziges Finder-Fenster ohne Einzelpositionen, deshalb liest `DesktopIconReader` die Rahmen über die Accessibility-API (Finder → AXScrollArea → AXImage), alle 2 s im Hintergrund. Standardmäßig aus; beim Einschalten im Menü fragt macOS nach „Bedienungshilfen“. Ohne Freigabe liefert er nichts. Icons liegen hinter Fenstern und Widgets, flache Kappe (`iconMaxHeight`), keine Eiszapfen, Klicks auf Icons gehen immer durch. Prüfen: `open --env SNOWPILE_ICONS=list --stdout /dev/tty SnowPile.app` bzw. im Debug-Modus die roten Linien.
 
 ### Fallende Flocken
 - Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500), dazu 2200 Plätze für Pulver, damit auch ein volles Fenster komplett zerstäuben kann, ohne den Schneefall zu unterbrechen
@@ -111,7 +111,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Rendering: alle aktiven Partikel und Szenenobjekte werden pro Frame in einen vorallokierten `MTLBuffer` gepackt (`FlakeSprites.pack`, `SceneSprites.write`, getestet) und mit einem einzigen instanzierten Draw-Call gezeichnet. Die Scheibe entsteht prozedural im Fragment-Shader. Nicht SpriteKit: 800 `SKSpriteNode`s kosteten allein durch die Property-Setter ca. 10 % CPU.
 
 ### Menüleiste und Einstellungen
-- `MenuBarExtra` mit Schneeflocken-SF-Symbol. Optionen: An/Aus, Intensität (leicht / mittel / Schneesturm), Flockengröße, Wind, Modus „nur aktives Fenster“ oder „alle Fenster“, Schnee am Boden an/aus, „Schnee abschütteln“ (Reset), Launch at Login, Beenden
+- `MenuBarExtra` mit Schneeflocken-SF-Symbol. Optionen: An/Aus, Intensität (leicht / mittel / Schneesturm), Flockengröße, Wind, Modus „nur aktives Fenster“ oder „alle Fenster“, Schnee am Boden an/aus, Schaufler, Schneemänner, Eiszapfen, Widgets, Schreibtisch-Icons, „Schnee abschütteln“ (Reset), Launch at Login, Beenden
 - Persistenz über `@AppStorage` / `UserDefaults`
 - Launch at Login über `SMAppService.mainApp` (funktioniert nur im `.app`-Bundle)
 

@@ -12,6 +12,9 @@ public struct SnowConfig: Sendable {
     /// Keeps snow off the rounded window corners.
     public var windowCornerInset: CGFloat = 12
     public var widgetCornerInset: CGFloat = 16
+    public var iconInset: CGFloat = 6
+    /// Icons are small: a thinner cap.
+    public var iconMaxHeight: CGFloat = 8
     /// Share of a flake's disc area that ends up as lying snow. Tuned so the ground fills in about five minutes.
     public var volumeScale: CGFloat = 0.25
     /// Extra pool slots for powder (snow falling off windows), on top of `maxFlakes`.
@@ -350,7 +353,7 @@ public struct SnowSimulation {
             if let previous {
                 velocity = Self.measureVelocity(from: previous, to: window.bounds, timestamp: timestamp)
             }
-            let geometry = windowSurfaceGeometry(window.bounds, isWidget: window.isWidget)
+            let geometry = windowSurfaceGeometry(window.bounds, inset: cornerInset(of: window))
             if var surface, let previous, let geometry {
                 residual = relocate(&surface, from: previous, to: window.bounds, geometry: geometry, timestamp: timestamp)
                 updated.append(surface)
@@ -359,7 +362,8 @@ public struct SnowSimulation {
                 if let geometry {
                     updated.append(makeSurface(
                         kind: .window(number: window.number), minX: geometry.minX, baseY: geometry.baseY,
-                        width: geometry.width, maxHeight: config.windowMaxHeight, edges: .spill
+                        width: geometry.width, maxHeight: window.isDesktopIcon ? config.iconMaxHeight : config.windowMaxHeight,
+                        edges: .spill
                     ))
                 }
             }
@@ -371,7 +375,7 @@ public struct SnowSimulation {
         for surface in existing.values { powderize(surface) }
         for i in updated.indices {
             guard case .window(let number) = updated[i].kind, let window = windows.first(where: { $0.number == number }) else { continue }
-            let inset = window.isWidget ? config.widgetCornerInset : config.windowCornerInset
+            let inset = cornerInset(of: window)
             updated[i].clippedLeft = window.bounds.minX + inset < bounds.minX && screenContinues(side: -1, y: window.bounds.minY)
             updated[i].clippedRight = window.bounds.maxX - inset > bounds.maxX && screenContinues(side: 1, y: window.bounds.minY)
         }
@@ -418,11 +422,14 @@ public struct SnowSimulation {
     }
 
     /// Top edge of a window, inset from its rounded corners and clipped to the screen. Nil if not on screen.
-    private func windowSurfaceGeometry(_ window: CGRect, isWidget: Bool = false) -> (minX: CGFloat, baseY: CGFloat, width: CGFloat)? {
+    /// Widgets have much rounder corners than windows; desktop icons are small and need little.
+    func cornerInset(of window: WindowInfo) -> CGFloat {
+        window.isDesktopIcon ? config.iconInset : window.isWidget ? config.widgetCornerInset : config.windowCornerInset
+    }
+
+    private func windowSurfaceGeometry(_ window: CGRect, inset: CGFloat) -> (minX: CGFloat, baseY: CGFloat, width: CGFloat)? {
         let top = window.minY
         guard top >= bounds.minY + topInset + Self.minHeadroom, top < bounds.maxY else { return nil }
-        // Widgets have much rounder corners than windows.
-        let inset = isWidget ? config.widgetCornerInset : config.windowCornerInset
         let minX = max(window.minX + inset, bounds.minX)
         let maxX = min(window.maxX - inset, bounds.maxX)
         guard maxX - minX >= 2 * Surface.columnWidth else { return nil }

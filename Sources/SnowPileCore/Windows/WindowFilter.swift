@@ -6,14 +6,17 @@ public struct WindowInfo: Equatable, Sendable {
     public var number: Int
     public var ownerPID: Int32
     public var bounds: CGRect
-    /// A desktop widget (behind all normal windows). Carries snow, but no icicles.
+    /// A desktop widget or icon (behind all normal windows). Carries snow, but no icicles.
     public var isWidget: Bool
+    /// A desktop icon (implies `isWidget`): small, square corners.
+    public var isDesktopIcon: Bool
 
-    public init(number: Int, ownerPID: Int32, bounds: CGRect, isWidget: Bool = false) {
+    public init(number: Int, ownerPID: Int32, bounds: CGRect, isWidget: Bool = false, isDesktopIcon: Bool = false) {
         self.number = number
         self.ownerPID = ownerPID
         self.bounds = bounds
-        self.isWidget = isWidget
+        self.isWidget = isWidget || isDesktopIcon
+        self.isDesktopIcon = isDesktopIcon
     }
 }
 

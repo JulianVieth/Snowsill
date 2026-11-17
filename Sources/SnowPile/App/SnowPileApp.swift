@@ -42,6 +42,16 @@ struct MenuContent: View {
             .disabled(!settings.groundEnabled)
         Toggle("Eiszapfen", isOn: $settings.iciclesEnabled)
         Toggle("Schnee auf Widgets", isOn: $settings.widgetsEnabled)
+        Toggle("Schnee auf Schreibtisch-Icons", isOn: Binding(
+            get: { settings.iconsEnabled },
+            set: { on in
+                settings.iconsEnabled = on
+                if on && !DesktopIconReader.isTrusted { DesktopIconReader.requestTrust() }
+            }
+        ))
+        if settings.iconsEnabled && !DesktopIconReader.isTrusted {
+            Text("Braucht „Bedienungshilfen“ in den Systemeinstellungen")
+        }
         Divider()
         Button("Schnee abschütteln", action: shakeOff)
         Toggle("Beim Anmelden starten", isOn: Binding(
@@ -67,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let scenario = env["SNOWPILE_SNAPSHOT"] {
             let out = env["SNOWPILE_SNAPSHOT_OUT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             exit(SnapshotRunner.run(scenarioName: scenario, outputDirectory: out, debug: env["SNOWPILE_DEBUG"] == "1"))
+        }
+        if env["SNOWPILE_ICONS"] == "list" {
+            print("Bedienungshilfen: \(DesktopIconReader.isTrusted ? "erlaubt" : "nicht erlaubt")")
+            for frame in DesktopIconReader.readIconFrames() { print("Icon \(frame)") }
+            exit(0)
         }
         if let action = env["SNOWPILE_LOGIN_ITEM"] {
             exit(LoginItemCheck.run(action))
