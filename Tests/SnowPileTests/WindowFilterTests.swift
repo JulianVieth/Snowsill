@@ -53,4 +53,42 @@ import Testing
         #expect(WindowFilter.activeWindow(in: windows, activePID: 30) == nil)
         #expect(WindowFilter.activeWindow(in: windows, activePID: nil) == nil)
     }
+
+    // MARK: - Widgets and click blockers
+
+    static let widgetLayer = Int(CGWindowLevelForKey(.desktopIconWindow)) + 2
+
+    @Test func widgetsOfNotificationCenterComeAfterAllWindows() {
+        let list = [
+            entry(number: 24, pid: 50, layer: Self.widgetLayer, bounds: CGRect(x: 188, y: 42, width: 180, height: 180)),
+            entry(number: 3, pid: 10),
+            entry(number: 23, pid: 50, layer: Self.widgetLayer, bounds: CGRect(x: 8, y: 42, width: 180, height: 180)),
+            entry(number: 4, pid: 11),
+        ]
+        let scan = WindowFilter.scan(list, ownPID: 99, widgetPID: 50)
+        #expect(scan.windows.map(\.number) == [3, 4, 24, 23])
+        #expect(scan.windows.map(\.isWidget) == [false, false, true, true])
+    }
+
+    @Test func desktopLayerWindowsOfOtherAppsAreNoWidgets() {
+        let list = [
+            entry(number: 24, pid: 51, layer: Self.widgetLayer, bounds: CGRect(x: 188, y: 42, width: 180, height: 180)),
+            // Notification Center's own panel sits far above the desktop.
+            entry(number: 30, pid: 50, layer: 23, bounds: CGRect(x: 1000, y: 0, width: 400, height: 900)),
+        ]
+        let scan = WindowFilter.scan(list, ownPID: 99, widgetPID: 50)
+        #expect(scan.windows.isEmpty)
+    }
+
+    @Test func floatingWindowsOfOtherAppsBlockClicks() {
+        let list = [
+            entry(number: 1, pid: 10, layer: 3, bounds: CGRect(x: 0, y: 0, width: 300, height: 200)),
+            entry(number: 2, pid: 99, layer: 3, bounds: CGRect(x: 0, y: 0, width: 1000, height: 1000)),  // ours
+            entry(number: 3, pid: 12, layer: 20, bounds: CGRect(x: 0, y: 0, width: 1000, height: 1000)), // Dock: above us anyway
+            entry(number: 4, pid: 13, layer: 0),
+        ]
+        let scan = WindowFilter.scan(list, ownPID: 99, widgetPID: nil)
+        #expect(scan.blockers == [CGRect(x: 0, y: 0, width: 300, height: 200)])
+        #expect(scan.windows.map(\.number) == [4])
+    }
 }

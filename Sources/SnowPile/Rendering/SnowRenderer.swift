@@ -23,7 +23,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         var debugStart: Int
     }
 
-    private let screenFrameCG: CGRect
+    let screenFrameCG: CGRect
     private let debug: Bool
     private var simulation: SnowSimulation
     private let device: MTLDevice
@@ -51,26 +51,32 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var debugFrames = 0
     private var debugElapsed: CFTimeInterval = 0
 
-    convenience init?(view: MTKView, screenFrameCG: CGRect, config: SnowConfig, debug: Bool) {
+    convenience init?(view: MTKView, screenFrameCG: CGRect, screenIndex: Int, config: SnowConfig, debug: Bool) {
         guard let device = view.device else { return nil }
-        self.init(device: device, pixelFormat: view.colorPixelFormat, screenFrameCG: screenFrameCG, config: config, debug: debug)
+        self.init(device: device, pixelFormat: view.colorPixelFormat, screenFrameCG: screenFrameCG, screenIndex: screenIndex,
+                  config: config, debug: debug)
         if debug {
             let label = NSTextField(labelWithString: "")
             label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .systemRed
-            label.frame = NSRect(x: 12, y: 60, width: 760, height: 20)
+            label.frame = NSRect(x: 12, y: view.bounds.height - 70, width: 900, height: 20)
             view.addSubview(label)
             debugLabel = label
         }
     }
 
     /// Without a view, for offscreen rendering (snapshot mode). A fixed `seed` makes runs repeatable.
-    init?(device: MTLDevice, pixelFormat: MTLPixelFormat, screenFrameCG: CGRect, config: SnowConfig, debug: Bool, seed: UInt64? = nil) {
+    init?(
+        device: MTLDevice, pixelFormat: MTLPixelFormat, screenFrameCG: CGRect, screenIndex: Int = 0,
+        config: SnowConfig, debug: Bool, seed: UInt64? = nil
+    ) {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.screenFrameCG = screenFrameCG
         self.debug = debug
         self.device = device
-        simulation = SnowSimulation(config: config, bounds: screenFrameCG, seed: seed ?? UInt64.random(in: .min ... .max))
+        simulation = SnowSimulation(
+            config: config, bounds: screenFrameCG, screenIndex: screenIndex, seed: seed ?? UInt64.random(in: .min ... .max)
+        )
         commandQueue = queue
         surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
 
@@ -186,7 +192,10 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         let capacity = buffer.length / MemoryLayout<Sprite>.stride
         let pointer = buffer.contents().bindMemory(to: Sprite.self, capacity: capacity)
         var writer = SpriteWriter(buffer: UnsafeMutableBufferPointer(start: pointer, count: capacity), screenFrameCG: screenFrameCG)
-        SceneSprites.write(simulation, into: &writer)
+        let now = lastFrameTime ?? 0
+        SceneSprites.write(simulation, into: &writer) { number in
+            self.predictedOffset(forWindow: number, now: now)
+        }
         FlakeSprites.pack(simulation.flakes, into: &writer)
         if writer.count > 0 {
             encoder.setRenderPipelineState(spritePipeline)
@@ -271,11 +280,27 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     /// Window positions arrive with a delay and the frame shows even later. Moving window surfaces are drawn
     /// where the window will be by then, extrapolated from its measured velocity.
     private func predictedOffset(for surface: Surface, now: CFTimeInterval) -> CGVector {
-        guard case .window(let number) = surface.kind,
-              let motion = simulation.motion(ofWindow: number), motion.velocity != .zero else { return .zero }
+        guard case .window(let number) = surface.kind else { return .zero }
+        return predictedOffset(forWindow: number, now: now)
+    }
+
+    private func predictedOffset(forWindow number: Int, now: CFTimeInterval) -> CGVector {
+        guard let motion = simulation.motion(ofWindow: number), motion.velocity != .zero else { return .zero }
         let horizon = CGFloat(min(max(now - motion.timestamp + Self.displayLatency, 0), Self.maxPrediction))
         return CGVector(dx: motion.velocity.dx * horizon, dy: motion.velocity.dy * horizon)
     }
+
+    /// After a pause the first frame must not see the whole pause as one time step.
+    func resumeClock() {
+        lastFrameTime = nil
+    }
+
+    // MARK: - Mouse
+
+    func canGrab(at p: CGPoint, windows: [CGRect]) -> Bool { simulation.canGrab(at: p, windows: windows) }
+    func beginGrab(at p: CGPoint, windows: [CGRect]) -> Bool { simulation.beginGrab(at: p, windows: windows) }
+    func moveGrab(to p: CGPoint) { simulation.moveGrab(to: p) }
+    func endGrab() { simulation.endGrab() }
 
     /// Direct access for snapshot scenarios that need a prepared state.
     func withSimulation(_ body: (inout SnowSimulation) -> Void) {

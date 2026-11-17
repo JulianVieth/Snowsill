@@ -115,12 +115,12 @@ extension SnowSimulation {
         }
     }
 
-    private func groundTop(at x: CGFloat) -> CGFloat? {
+    func groundTop(at x: CGFloat) -> CGFloat? {
         guard let g = groundIndex, let c = surfaces[g].column(at: min(max(x, surfaces[g].minX), surfaces[g].maxX - 0.01)) else { return nil }
         return surfaces[g].topY(atColumn: c)
     }
 
-    private var groundIndex: Int? {
+    var groundIndex: Int? {
         surfaces.firstIndex { if case .ground = $0.kind { return true } else { return false } }
     }
 
@@ -193,9 +193,4 @@ extension SnowSimulation {
         return spawn(kind: .clump, at: position, radius: radius, snowVolume: volume, velocity: velocity,
                      driftX: driftX, swayAmplitude: 0.5, opacity: 1)
     }
-}
-
-extension SnowSimulation {
-    /// X ranges on the ground the plow must not drive into (snowmen and balls). Filled in by the snowball logic.
-    func groundObstacles() -> [ClosedRange<CGFloat>] { [] }
 }

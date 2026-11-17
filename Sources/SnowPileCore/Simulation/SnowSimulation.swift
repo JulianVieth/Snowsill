@@ -11,6 +11,7 @@ public struct SnowConfig: Sendable {
     public var windowMaxHeight: CGFloat = 14
     /// Keeps snow off the rounded window corners.
     public var windowCornerInset: CGFloat = 12
+    public var widgetCornerInset: CGFloat = 20
     /// Share of a flake's disc area that ends up as lying snow. Tuned so the ground fills in about five minutes.
     public var volumeScale: CGFloat = 0.25
     /// Extra pool slots for powder (snow falling off windows), on top of `maxFlakes`.
@@ -33,6 +34,8 @@ public struct SnowConfig: Sendable {
     /// Scales the breeze and gusts; 0 is calm.
     public var windStrength: CGFloat = 1
 
+    public var snowmenEnabled = true
+    public var iciclesEnabled = true
     public var plowEnabled = true
     /// Mean ground height (pt) that calls the plow.
     public var plowThreshold: CGFloat = 22
@@ -71,6 +74,10 @@ public struct SnowSimulation {
     public internal(set) var config: SnowConfig
     /// Area flakes fall through, in CG coordinates.
     public var bounds: CGRect
+    /// Height of the menu bar at the top of the screen. Windows need some room below it to carry snow,
+    /// otherwise their snow would lie inside the menu bar (a maximized window, for example).
+    public var topInset: CGFloat = 0
+    static let minHeadroom: CGFloat = 6
     public internal(set) var flakes: ContiguousArray<Flake>
     public internal(set) var activeCount = 0
     /// Active flakes of regular snowfall, limited to `config.maxFlakes`. Powder comes on top.
@@ -95,6 +102,9 @@ public struct SnowSimulation {
     /// Seconds of simulated time.
     public internal(set) var time: Double = 0
     public internal(set) var plow = Plow()
+    public internal(set) var stacks: [SnowStack] = []
+    public internal(set) var held: HeldBall?
+    var nextStackID = 1
 
     /// Horizontal wind speed (pt/s) acting on all particles.
     public internal(set) var windX: CGFloat = 0
@@ -102,22 +112,52 @@ public struct SnowSimulation {
     private var tracked: [Int: TrackedWindow] = [:]
     private var nextSurfaceID = 1
 
-    public init(config: SnowConfig = SnowConfig(), bounds: CGRect, seed: UInt64 = UInt64.random(in: .min ... .max)) {
+    /// `screenIndex` names the ground surface; each screen runs its own simulation.
+    public init(config: SnowConfig = SnowConfig(), bounds: CGRect, screenIndex: Int = 0, seed: UInt64 = UInt64.random(in: .min ... .max)) {
         var config = config
         config.maxFlakes = min(max(config.maxFlakes, 0), Self.hardFlakeLimit)
+        config.powderCapacity = max(config.powderCapacity, 0)
         self.config = config
         self.bounds = bounds
+        self.screenIndex = screenIndex
         self.rng = SplitMix64(seed: seed)
-        config.powderCapacity = max(config.powderCapacity, 0)
         let capacity = config.maxFlakes + config.powderCapacity
         flakes = ContiguousArray(repeating: Flake(), count: capacity)
         freeSlots = ContiguousArray((0..<capacity).reversed())
-        if config.groundEnabled {
-            surfaces.append(makeSurface(
-                kind: .ground(screen: 0), minX: bounds.minX, baseY: bounds.maxY,
-                width: bounds.width, maxHeight: config.groundMaxHeight, edges: .walls
-            ))
+        if config.groundEnabled { addGround() }
+    }
+
+    public let screenIndex: Int
+
+    private mutating func addGround() {
+        surfaces.insert(makeSurface(
+            kind: .ground(screen: screenIndex), minX: bounds.minX, baseY: bounds.maxY,
+            width: bounds.width, maxHeight: config.groundMaxHeight, edges: .walls
+        ), at: 0)
+    }
+
+    /// Applies changed settings. Grows the particle pool if needed (never shrinks it, so nothing in flight is lost),
+    /// and adds or removes the ground. Removing the ground drops its snow and everything standing on it.
+    public mutating func apply(_ newConfig: SnowConfig) {
+        var newConfig = newConfig
+        newConfig.maxFlakes = min(max(newConfig.maxFlakes, 0), Self.hardFlakeLimit)
+        newConfig.powderCapacity = config.powderCapacity
+        let needed = newConfig.maxFlakes + newConfig.powderCapacity
+        if needed > flakes.count {
+            let old = flakes.count
+            flakes.append(contentsOf: repeatElement(Flake(), count: needed - old))
+            freeSlots.insert(contentsOf: (old..<needed).reversed(), at: 0)
         }
+        let hadGround = config.groundEnabled
+        config = newConfig
+        if newConfig.groundEnabled && !hadGround {
+            addGround()
+        } else if !newConfig.groundEnabled && hadGround {
+            surfaces.removeAll { if case .ground = $0.kind { return true } else { return false } }
+            stacks.removeAll { $0.support == .ground }
+            plow = Plow()
+        }
+        if !newConfig.snowmenEnabled { held = nil }
     }
 
     public static func flakeVolume(radius: CGFloat, config: SnowConfig) -> CGFloat {
@@ -171,6 +211,7 @@ public struct SnowSimulation {
         }
 
         stepPlow(dt: t)
+        stepStacks(dt: t)
 
         for i in surfaces.indices {
             let spilled = surfaces[i].relax()
@@ -207,9 +248,16 @@ public struct SnowSimulation {
     mutating func depositSpreading(surface s: Int, volume: CGFloat, x: CGFloat, radius: CGFloat) {
         var remaining = volume - surfaces[s].deposit(volume: volume, minX: x - radius, maxX: x + radius)
         var reach = max(radius, Surface.columnWidth) * 2
-        while remaining > 1e-9, reach < 400 {
-            remaining -= surfaces[s].deposit(volume: remaining, minX: x - reach, maxX: x + reach)
-            reach *= 2
+        let fullWidth = surfaces[s].maxX - surfaces[s].minX
+        var attempts = 0
+        // Full columns reject their share, so repeat; widen when little fits.
+        while remaining > 1e-9, attempts < 32 {
+            attempts += 1
+            let added = surfaces[s].deposit(volume: remaining, minX: x - reach, maxX: x + reach)
+            remaining -= added
+            if added < remaining {
+                if reach >= fullWidth { if added <= 1e-12 { break } } else { reach *= 2 }
+            }
         }
     }
 
@@ -253,7 +301,7 @@ public struct SnowSimulation {
             if let previous {
                 velocity = Self.measureVelocity(from: previous, to: window.bounds, timestamp: timestamp)
             }
-            let geometry = windowSurfaceGeometry(window.bounds)
+            let geometry = windowSurfaceGeometry(window.bounds, isWidget: window.isWidget)
             if var surface, let previous, let geometry {
                 residual = relocate(&surface, from: previous, to: window.bounds, geometry: geometry, timestamp: timestamp)
                 updated.append(surface)
@@ -313,11 +361,13 @@ public struct SnowSimulation {
     }
 
     /// Top edge of a window, inset from its rounded corners and clipped to the screen. Nil if not on screen.
-    private func windowSurfaceGeometry(_ window: CGRect) -> (minX: CGFloat, baseY: CGFloat, width: CGFloat)? {
+    private func windowSurfaceGeometry(_ window: CGRect, isWidget: Bool = false) -> (minX: CGFloat, baseY: CGFloat, width: CGFloat)? {
         let top = window.minY
-        guard top >= bounds.minY, top < bounds.maxY else { return nil }
-        let minX = max(window.minX + config.windowCornerInset, bounds.minX)
-        let maxX = min(window.maxX - config.windowCornerInset, bounds.maxX)
+        guard top >= bounds.minY + topInset + Self.minHeadroom, top < bounds.maxY else { return nil }
+        // Widgets have much rounder corners than windows.
+        let inset = isWidget ? config.widgetCornerInset : config.windowCornerInset
+        let minX = max(window.minX + inset, bounds.minX)
+        let maxX = min(window.maxX - inset, bounds.maxX)
         guard maxX - minX >= 2 * Surface.columnWidth else { return nil }
         return (minX, top, maxX - minX)
     }
@@ -562,6 +612,8 @@ public struct SnowSimulation {
         snowfallCount = 0
         spawnAccumulator = 0
         for i in surfaces.indices { surfaces[i].clear() }
+        stacks.removeAll()
+        held = nil
     }
 
     /// Fills the ground with an irregular layer around `height`, for scenarios that start with deep snow.

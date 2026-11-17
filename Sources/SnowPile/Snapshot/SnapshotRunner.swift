@@ -48,6 +48,16 @@ enum SnapshotRunner {
             if tracker.shouldDeliver(windows, at: t) {
                 renderer.setWindows(windows, timestamp: t)
             }
+            if let mouse = scenario.mouse(t) {
+                renderer.withSimulation { sim in
+                    let rects = windows.map(\.bounds)
+                    if mouse.down {
+                        if sim.held == nil { sim.beginGrab(at: mouse.point, windows: rects) } else { sim.moveGrab(to: mouse.point) }
+                    } else if sim.held != nil {
+                        sim.endGrab()
+                    }
+                }
+            }
             renderer.advance(to: t)
 
             while let next = captures.first, next <= t + 0.5 / frameRate {

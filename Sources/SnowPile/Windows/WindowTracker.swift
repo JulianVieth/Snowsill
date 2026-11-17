@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import QuartzCore
@@ -7,7 +8,7 @@ import SnowPileCore
 /// Polls at 12 Hz while nothing moves and at 60 Hz right after a change, so snow keeps up with a dragged window.
 /// In fast mode every poll is delivered, also unchanged ones: that is how the simulation learns a window stopped.
 final class WindowTracker: @unchecked Sendable {
-    typealias Handler = @MainActor @Sendable (_ windows: [WindowInfo], _ timestamp: CFTimeInterval) -> Void
+    typealias Handler = @MainActor @Sendable (_ scan: WindowScan, _ timestamp: CFTimeInterval) -> Void
 
     private static let idleInterval: TimeInterval = 1.0 / 12
     private static let activeInterval: TimeInterval = 1.0 / 60
@@ -17,7 +18,10 @@ final class WindowTracker: @unchecked Sendable {
     // All state below is only touched on `queue`.
     private let queue = DispatchQueue(label: "SnowPile.WindowTracker", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
-    private var last: [WindowInfo]?
+    private var last: WindowScan?
+    /// Notification Center draws the desktop widgets. Looked up now and then, since it can restart.
+    private var widgetPID: Int32?
+    private var widgetLookup: CFTimeInterval = -.infinity
     private var lastChange: CFTimeInterval = -.infinity
     private var isFast = false
     private let ownPID = getpid()
@@ -52,14 +56,19 @@ final class WindowTracker: @unchecked Sendable {
         let now = CACurrentMediaTime()
         guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] else { return }
-        let windows = WindowFilter.parse(raw, ownPID: ownPID)
+        if now - widgetLookup > 5 {
+            widgetLookup = now
+            widgetPID = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.notificationcenterui")
+                .first?.processIdentifier
+        }
+        let scan = WindowFilter.scan(raw, ownPID: ownPID, widgetPID: widgetPID)
 
-        let changed = windows != last
+        let changed = scan != last
         if changed || isFast {
-            Task { @MainActor in onChange(windows, now) }
+            Task { @MainActor in onChange(scan, now) }
         }
         if changed {
-            last = windows
+            last = scan
             lastChange = now
             if !isFast {
                 isFast = true

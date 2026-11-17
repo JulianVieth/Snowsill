@@ -3,8 +3,88 @@ import Foundation
 
 /// Sprites for everything that isn't a falling particle or a snow surface: plow, snowballs, snowmen, icicles.
 public enum SceneSprites {
-    public static func write(_ simulation: SnowSimulation, into writer: inout SpriteWriter) {
+    /// `windowOffset` is the predicted drawing offset of a window's surface, so things on it stay glued to it.
+    public static func write(
+        _ simulation: SnowSimulation, into writer: inout SpriteWriter, windowOffset: (Int) -> CGVector = { _ in .zero }
+    ) {
         writePlow(simulation, into: &writer)
+        for stack in simulation.stacks {
+            var offset = CGVector.zero
+            if case .window(let number, _) = stack.support { offset = windowOffset(number) }
+            writeStack(stack, offset: offset, into: &writer)
+        }
+        if let ball = simulation.held {
+            writer.add(.ball, at: ball.center, size: CGSize(width: ball.radius, height: ball.radius), seed: 0.37)
+        }
+    }
+
+    // MARK: - Snowballs and snowmen
+
+    static let coal = SIMD4<Float>(0.10, 0.10, 0.12, 1)
+    static let carrot = SIMD4<Float>(0.98, 0.50, 0.10, 1)
+    static let twig = SIMD4<Float>(0.40, 0.26, 0.15, 1)
+    static let hatColor = SIMD4<Float>(0.12, 0.12, 0.14, 1)
+    static let hatBand = SIMD4<Float>(0.78, 0.12, 0.14, 1)
+    static let scarf = SIMD4<Float>(0.82, 0.16, 0.18, 1)
+
+    static func writeStack(_ stack: SnowStack, offset: CGVector, into writer: inout SpriteWriter) {
+        let radii = stack.radii
+        let centers = stack.centers.map { CGPoint(x: $0.x + offset.dx, y: $0.y + offset.dy) }
+        for (i, (c, r)) in zip(centers, radii).enumerated() {
+            writer.add(.ball, at: c, size: CGSize(width: r, height: r), seed: CGFloat(stack.id % 17) * 0.11 + CGFloat(i) * 0.3)
+        }
+        guard stack.isSnowman, radii.count >= 3 else { return }
+        let body = centers[1], rb = radii[1]
+        let head = centers[2], rh = radii[2]
+
+        // Arms: twigs from the sides of the middle ball, angled up, with a small fork.
+        for side in [CGFloat(-1), 1] {
+            let length = rb * 1.25
+            let angle: CGFloat = 0.45 // up from horizontal
+            let start = CGPoint(x: body.x + side * rb * 0.75, y: body.y - rb * 0.15)
+            let mid = CGPoint(x: start.x + side * cos(angle) * length / 2, y: start.y - sin(angle) * length / 2)
+            writer.add(.rect, at: mid, size: CGSize(width: length / 2, height: max(rb * 0.05, 0.9)), color: twig,
+                       rotation: -side * angle, param: 0.6)
+            let tip = CGPoint(x: start.x + side * cos(angle) * length * 0.8, y: start.y - sin(angle) * length * 0.8)
+            let fork = CGPoint(x: tip.x + side * length * 0.08, y: tip.y - length * 0.12)
+            writer.add(.rect, at: fork, size: CGSize(width: length * 0.13, height: max(rb * 0.04, 0.7)), color: twig,
+                       rotation: -side * 1.2, param: 0.5)
+        }
+        // Buttons down the middle ball.
+        for k in 0..<3 {
+            let y = body.y - rb * 0.42 + CGFloat(k) * rb * 0.42
+            writer.add(.disc, at: CGPoint(x: body.x, y: y), size: CGSize(width: max(rb * 0.085, 1), height: 0), color: coal)
+        }
+        // Scarf around the neck.
+        let neckY = head.y + rh * 0.88
+        writer.add(.rect, at: CGPoint(x: head.x, y: neckY), size: CGSize(width: rh * 0.92, height: max(rh * 0.16, 1.2)),
+                   color: scarf, param: rh * 0.15)
+        writer.add(.rect, at: CGPoint(x: head.x + rh * 0.45, y: neckY + rh * 0.38), size: CGSize(width: max(rh * 0.14, 1), height: rh * 0.36),
+                   color: scarf, rotation: -0.15, param: rh * 0.08)
+        // Eyes.
+        for side in [CGFloat(-1), 1] {
+            writer.add(.disc, at: CGPoint(x: head.x + side * rh * 0.33, y: head.y - rh * 0.22),
+                       size: CGSize(width: max(rh * 0.11, 0.9), height: 0), color: coal)
+        }
+        // Carrot nose, pointing to the right.
+        let noseLength = rh * 0.75
+        writer.add(.triangle, at: CGPoint(x: head.x + noseLength / 2 + rh * 0.05, y: head.y + rh * 0.05),
+                   size: CGSize(width: noseLength / 2, height: max(rh * 0.14, 1)), color: carrot)
+        // Smile of coal bits.
+        for k in -2...2 {
+            let a = CGFloat(k) * 0.32
+            let p = CGPoint(x: head.x + sin(a) * rh * 0.5, y: head.y + rh * 0.38 + (1 - cos(a)) * -rh * 0.35)
+            writer.add(.disc, at: p, size: CGSize(width: max(rh * 0.06, 0.7), height: 0), color: coal)
+        }
+        // Top hat with a red band.
+        let brimY = head.y - rh * 0.78
+        writer.add(.rect, at: CGPoint(x: head.x, y: brimY), size: CGSize(width: rh * 0.82, height: max(rh * 0.07, 0.8)),
+                   color: hatColor, param: rh * 0.05)
+        let crownHeight = rh * 0.62
+        writer.add(.rect, at: CGPoint(x: head.x, y: brimY - crownHeight / 2), size: CGSize(width: rh * 0.52, height: crownHeight / 2),
+                   color: hatColor, param: rh * 0.04)
+        writer.add(.rect, at: CGPoint(x: head.x, y: brimY - rh * 0.13), size: CGSize(width: rh * 0.53, height: max(rh * 0.06, 0.6)),
+                   color: hatBand)
     }
 
     // MARK: - Plow
@@ -20,7 +100,8 @@ public enum SceneSprites {
     static func writePlow(_ simulation: SnowSimulation, into writer: inout SpriteWriter) {
         let plow = simulation.plow
         guard plow.isActive else { return }
-        let d = plow.direction
+        // Leaving after a stop it backs off, still facing what it stopped at.
+        let d = plow.phase == .leaving ? -plow.direction : plow.direction
         let ground = simulation.bounds.maxY - 1.5
         let bx = plow.x
         // Positions along the vehicle, measured backwards from the blade.
@@ -28,7 +109,7 @@ public enum SceneSprites {
 
         // Wall of snow in front of the blade.
         let wall = plow.wallShape
-        if wall.height > 0.5 {
+        if wall.height > 0.5 && plow.phase == .plowing {
             writer.add(.mound, at: CGPoint(x: bx + d * wall.halfWidth * 0.85, y: ground - wall.height / 2),
                        size: CGSize(width: wall.halfWidth, height: wall.height / 2),
                        seed: CGFloat(plow.run % 7) * 0.13)

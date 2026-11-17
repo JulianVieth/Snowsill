@@ -69,6 +69,8 @@ public struct SpriteWriter {
     ) {
         guard count < buffer.count else { return }
         let p = Coordinates.sceneLocal(point, screenFrameCG: screenFrameCG)
+        // Discs are round: a missing height means "same as the width".
+        let size = shape == .disc && size.height == 0 ? CGSize(width: size.width, height: size.width) : size
         // CG y points down, the scene's y up: a clockwise CG rotation is negative in scene space.
         buffer[count] = Sprite(
             shape, at: SIMD2(Float(p.x), Float(p.y)), size: SIMD2(Float(size.width), Float(size.height)),

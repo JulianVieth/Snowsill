@@ -15,10 +15,12 @@ struct SnapshotScenario {
     var config = SnowConfig()
     /// Runs once before the first frame, e.g. to pre-fill the ground.
     var prepare: (inout SnowSimulation) -> Void = { _ in }
+    /// Scripted mouse: position (CG) and whether the button is down at time t, or nil for no mouse.
+    var mouse: (Double) -> (point: CGPoint, down: Bool)? = { _ in nil }
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman]
 
     private static let pid: Int32 = 4242
 
@@ -91,6 +93,51 @@ struct SnapshotScenario {
             focus: { _, _ in CGRect(x: 0, y: 760, width: 1440, height: 140) },
             config: config,
             prepare: { $0.fillGround(height: 32) }
+        )
+    }()
+
+    /// Rolls three balls out of deep ground snow and stacks them into a snowman, builds a second one on a window,
+    /// then closes that window, and finally the plow comes and stops in front of the first snowman.
+    static let snowman: SnapshotScenario = {
+        var config = SnowConfig()
+        config.plowInterval = 30
+        config.plowThreshold = 10
+        let window = CGRect(x: 820, y: 420, width: 460, height: 300)
+        // (start time, from x, to x, drop point): roll along the ground, lift, carry, release.
+        let rolls: [(t: Double, from: CGFloat, to: CGFloat, drop: CGPoint)] = [
+            (1, 80, 640, CGPoint(x: 420, y: 700)),
+            (6, 80, 420, CGPoint(x: 420, y: 520)),
+            (10, 680, 840, CGPoint(x: 422, y: 420)),
+            (14, 700, 1100, CGPoint(x: 1000, y: 300)),
+            (18, 700, 900, CGPoint(x: 1000, y: 250)),
+            (21.5, 1150, 1260, CGPoint(x: 1002, y: 200)),
+        ]
+        return SnapshotScenario(
+            name: "snowman",
+            summary: "Kugeln rollen, zwei Schneemänner bauen (Boden und Fenster), Fenster bei 27 s schließen, ab 30 s Schaufler",
+            duration: 42,
+            captures: [3, 5, 9.5, 13.5, 17, 25, 27.3, 28, 31, 34, 36, 42],
+            windows: { t in t < 27 ? [WindowInfo(number: 5, ownerPID: pid, bounds: window)] : [] },
+            focus: { t, _ in t < 29 ? CGRect(x: 300, y: 180, width: 1000, height: 720) : CGRect(x: 0, y: 500, width: 1440, height: 400) },
+            config: config,
+            prepare: { $0.fillGround(height: 30) },
+            mouse: { t in
+                for roll in rolls where t >= roll.t && t < roll.t + 3.2 {
+                    let u = t - roll.t
+                    let ground: CGFloat = 900 - 12
+                    if u < 2 {
+                        let x = roll.from + (roll.to - roll.from) * CGFloat(u / 2)
+                        return (CGPoint(x: x, y: ground), true)
+                    }
+                    if u < 3 {
+                        let k = CGFloat(u - 2)
+                        let p = CGPoint(x: roll.to + (roll.drop.x - roll.to) * k, y: ground + (roll.drop.y - ground) * k)
+                        return (p, true)
+                    }
+                    return (roll.drop, false)
+                }
+                return nil
+            }
         )
     }()
 

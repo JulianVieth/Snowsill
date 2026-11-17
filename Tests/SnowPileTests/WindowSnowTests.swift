@@ -50,6 +50,15 @@ import Testing
         #expect(surface.edges == .spill)
     }
 
+    @Test func windowRightBelowTheMenuBarCarriesNoSnow() {
+        var sim = SnowSimulation(config: config(), bounds: screen, seed: 2)
+        sim.topInset = 30
+        sim.setWindows([WindowInfo(number: 1, ownerPID: 10, bounds: CGRect(x: 0, y: 31, width: 400, height: 300))], timestamp: 0)
+        #expect(windowSurface(sim, 1) == nil)
+        sim.setWindows([WindowInfo(number: 1, ownerPID: 10, bounds: CGRect(x: 0, y: 60, width: 400, height: 300))], timestamp: 1)
+        #expect(windowSurface(sim, 1) != nil)
+    }
+
     @Test func surfaceIsClippedToScreen() throws {
         var sim = SnowSimulation(config: config(), bounds: screen, seed: 2)
         sim.setWindows([WindowInfo(number: 1, ownerPID: 10, bounds: CGRect(x: -100, y: 200, width: 400, height: 300))], timestamp: 0)

@@ -15,7 +15,8 @@ struct SnowPileApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let overlay = OverlayController()
+    let settings = Settings()
+    private lazy var overlay = OverlayController(settings: settings)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let env = ProcessInfo.processInfo.environment
