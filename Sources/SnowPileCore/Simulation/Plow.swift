@@ -74,13 +74,15 @@ extension SnowSimulation {
         if plow.phase == .plowing {
             // Stop in front of anything built on the ground.
             var blocked = false
+            // Leaves room for the wall in front of the blade, so it ends up before the obstacle, not under it.
+            let margin: CGFloat = 6 + plow.wallShape.halfWidth * 2
             for obstacle in groundObstacles() {
-                let margin: CGFloat = 4
-                if plow.direction > 0, obstacle.lowerBound - margin >= plow.x, target > obstacle.lowerBound - margin {
-                    target = obstacle.lowerBound - margin
+                // Anything ahead of the blade counts; the wall growing never lets it drive through.
+                if plow.direction > 0, obstacle.lowerBound >= plow.x, target > obstacle.lowerBound - margin {
+                    target = max(plow.x, obstacle.lowerBound - margin)
                     blocked = true
-                } else if plow.direction < 0, obstacle.upperBound + margin <= plow.x, target < obstacle.upperBound + margin {
-                    target = obstacle.upperBound + margin
+                } else if plow.direction < 0, obstacle.upperBound <= plow.x, target < obstacle.upperBound + margin {
+                    target = min(plow.x, obstacle.upperBound + margin)
                     blocked = true
                 }
             }
@@ -143,6 +145,9 @@ extension SnowSimulation {
         guard excess > 0 else { return }
         let front = plow.x + plow.direction * plow.wallShape.halfWidth * 2
         let far = front + plow.direction * 40
+        // Never onto (or under) a snowman: then the wall just grows.
+        let range = min(front, far)...max(front, far)
+        guard !groundObstacles().contains(where: { $0.overlaps(range) }) else { return }
         let added = surfaces[g].deposit(volume: excess, minX: min(front, far), maxX: max(front, far))
         plow.wallVolume -= added
     }

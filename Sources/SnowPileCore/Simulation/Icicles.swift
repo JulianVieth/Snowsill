@@ -29,7 +29,13 @@ extension SnowSimulation {
         return (bounds, group.icicles)
     }
 
-    public var icicleWindows: [Int] { Array(icicleGroups.keys) }
+    /// Calls `body` for every window with icicles, without allocating (used in the frame loop).
+    public func forEachIcicleGroup(_ body: (_ window: Int, _ bounds: CGRect, _ icicles: [Icicle]) -> Void) {
+        for (number, group) in icicleGroups where !group.icicles.isEmpty {
+            guard let bounds = tracked[number]?.bounds else { continue }
+            body(number, bounds, group.icicles)
+        }
+    }
 
     mutating func stepIcicles(dt: CGFloat) {
         guard config.iciclesEnabled else {

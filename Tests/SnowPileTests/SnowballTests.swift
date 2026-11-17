@@ -203,6 +203,34 @@ import Testing
         #expect(abs(total(s) - before) < 1e-3, "\(total(s) - before)")
     }
 
+    @Test func ballOnAWindowStaysPutWhenTheWindowReachesPastTheScreenEdge() throws {
+        var s = sim(groundHeight: 30)
+        s.setWindows([window], timestamp: 0)
+        makeBall(&s, at: 50, distance: 200, dropAt: 500, dropY: 200)
+        // 200 pt relative to the window's left edge.
+        var moved = window
+        moved.bounds.origin.x = -100
+        s.setWindows([moved], timestamp: 1)
+        run(&s, seconds: 0.1)
+        let stack = try #require(s.stacks.first)
+        #expect(abs(stack.x - 100) < 0.01)
+    }
+
+    @Test func coveredSnowmanStaysAndIsHidden() throws {
+        var s = sim(groundHeight: 30)
+        s.setWindows([window], timestamp: 0)
+        makeBall(&s, at: 50, distance: 200, dropAt: 500, dropY: 200)
+        let front = WindowInfo(number: 8, ownerPID: 2, bounds: CGRect(x: 400, y: 100, width: 300, height: 500))
+        s.setWindows([front, window], timestamp: 1)
+        run(&s, seconds: 1)
+        let stack = try #require(s.stacks.first)
+        #expect(stack.isHidden)
+        guard case .window(7, _) = stack.support else { Issue.record("fell off: \(stack.support)"); return }
+        s.setWindows([window], timestamp: 2)
+        run(&s, seconds: 0.1)
+        #expect(try !#require(s.stacks.first).isHidden)
+    }
+
     // MARK: - Plow
 
     @Test func plowStopsInFrontOfASnowman() throws {
@@ -221,7 +249,10 @@ import Testing
             if s.plow.isActive && s.plow.direction > 0 { closest = min(closest, stack.x - r - s.plow.x) }
         }
         #expect(closest >= 0)
-        #expect(closest < 20)
+        #expect(closest < 300)
+        // The wall it pushed is left in front of the snowman, not under it.
+        let after = try #require(s.stacks.first)
+        #expect(abs(after.bottomY - stack.bottomY) < 4)
         // The snowman is unharmed and the plow turned around and left.
         #expect(s.stacks.count == 1)
         #expect(!s.plow.isActive)

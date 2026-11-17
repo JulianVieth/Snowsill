@@ -4,7 +4,7 @@ import CoreGraphics
 public struct SnowStack: Sendable, Equatable {
     public enum Support: Sendable, Equatable {
         case ground
-        /// On a window's top edge, `offset` from the surface's minX, so it travels with the window.
+        /// On a window's top edge, `offset` from the window's left edge, so it travels with the window.
         case window(number: Int, offset: CGFloat)
         /// In the air. `shatters` when it lost its support (window closed): it bursts on impact.
         case falling(velocity: CGFloat, shatters: Bool)
@@ -17,6 +17,8 @@ public struct SnowStack: Sendable, Equatable {
     public internal(set) var x: CGFloat
     public internal(set) var bottomY: CGFloat
     public internal(set) var support: Support
+    /// Behind a window in front (its spot on the window's edge is covered). Kept, but not drawn.
+    public internal(set) var isHidden = false
 
     public static func radius(volume: CGFloat) -> CGFloat { (volume / .pi).squareRoot() }
 
@@ -73,7 +75,7 @@ extension SnowSimulation {
     public func canGrab(at p: CGPoint, windows: [CGRect]) -> Bool {
         guard config.snowmenEnabled, held == nil else { return held != nil }
         if windows.contains(where: { $0.contains(p) }) { return false }
-        if stacks.contains(where: { $0.contains(p, padding: 2) }) { return true }
+        if stacks.contains(where: { !$0.isHidden && $0.contains(p, padding: 2) }) { return true }
         guard let g = groundIndex, let column = surfaces[g].column(at: p.x) else { return false }
         let height = surfaces[g].heights[column]
         return height >= Self.minGrabHeight && p.y >= surfaces[g].topY(atColumn: column) - 4 && p.y <= surfaces[g].baseY
@@ -86,7 +88,7 @@ extension SnowSimulation {
     public mutating func beginGrab(at p: CGPoint, windows: [CGRect]) -> Bool {
         guard held == nil, canGrab(at: p, windows: windows) else { return false }
         // Topmost stack first (a stack in front of the ground snow).
-        if let index = stacks.lastIndex(where: { $0.contains(p, padding: 2) }) {
+        if let index = stacks.lastIndex(where: { !$0.isHidden && $0.contains(p, padding: 2) }) {
             var stack = stacks[index]
             let center = stack.centers.last ?? p
             let volume = stack.volumes.removeLast()
@@ -174,10 +176,12 @@ extension SnowSimulation {
             case .ground:
                 if let top = groundTop(at: stack.x) { stack.bottomY = top } else { stack.support = .falling(velocity: 0, shatters: true) }
             case .window(let number, let offset):
-                if let s = surfaces.firstIndex(where: { $0.kind == .window(number: number) }),
-                   let column = surfaces[s].column(at: surfaces[s].minX + offset), !surfaces[s].isHidden(column) {
-                    stack.x = surfaces[s].minX + offset
+                if let left = tracked[number]?.bounds.minX,
+                   let s = surfaces.firstIndex(where: { $0.kind == .window(number: number) }),
+                   let column = surfaces[s].column(at: left + offset) {
+                    stack.x = left + offset
                     stack.bottomY = surfaces[s].topY(atColumn: column)
+                    stack.isHidden = surfaces[s].isHidden(column)
                 } else {
                     // The window closed or the ground under the stack is gone: it falls and bursts.
                     stack.support = .falling(velocity: 0, shatters: true)
@@ -233,7 +237,7 @@ extension SnowSimulation {
         }
         // Stacking: only a smaller (or equal) ball onto an unfinished stack, and only if it sits on the ball.
         if stack.volumes.count == 1 {
-            for (j, other) in stacks.enumerated() where j != self_ && other.volumes.count < 3 {
+            for (j, other) in stacks.enumerated() where j != self_ && other.volumes.count < 3 && !other.isHidden {
                 if case .falling = other.support { continue }
                 guard let topR = other.radii.last, r <= topR * 1.02, abs(other.x - x) < topR * 0.7 else { continue }
                 guard let topCenter = other.centers.last else { continue }
@@ -246,7 +250,8 @@ extension SnowSimulation {
             switch surfaces[s].kind {
             case .ground: consider(top, .support(.ground))
             case .window(let number):
-                consider(top, .support(.window(number: number, offset: x - surfaces[s].minX)))
+                guard let left = tracked[number]?.bounds.minX else { continue }
+                consider(top, .support(.window(number: number, offset: x - left)))
             }
         }
         return best
