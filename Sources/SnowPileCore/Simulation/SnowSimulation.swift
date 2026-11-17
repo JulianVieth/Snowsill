@@ -87,6 +87,15 @@ public struct SnowSimulation {
     /// otherwise their snow would lie inside the menu bar (a maximized window, for example).
     public var topInset: CGFloat = 0
     static let minHeadroom: CGFloat = 6
+    /// The other screens (CG). Where one continues past this screen's edge, a window reaching across keeps its snow
+    /// at that edge instead of dropping it there.
+    public var neighborScreens: [CGRect] = []
+
+    /// Whether another screen continues past the left (`side` -1) or right (1) edge at height `y`.
+    func screenContinues(side: CGFloat, y: CGFloat) -> Bool {
+        let x = side < 0 ? bounds.minX - 1 : bounds.maxX + 1
+        return neighborScreens.contains { $0.contains(CGPoint(x: x, y: y)) }
+    }
     public internal(set) var flakes: ContiguousArray<Flake>
     public internal(set) var activeCount = 0
     /// Active flakes of regular snowfall, limited to `config.maxFlakes`. Powder comes on top.
@@ -332,6 +341,12 @@ public struct SnowSimulation {
         }
 
         for surface in existing.values { powderize(surface) }
+        for i in updated.indices {
+            guard case .window(let number) = updated[i].kind, let window = windows.first(where: { $0.number == number }) else { continue }
+            let inset = window.isWidget ? config.widgetCornerInset : config.windowCornerInset
+            updated[i].clippedLeft = window.bounds.minX + inset < bounds.minX && screenContinues(side: -1, y: window.bounds.minY)
+            updated[i].clippedRight = window.bounds.maxX - inset > bounds.maxX && screenContinues(side: 1, y: window.bounds.minY)
+        }
         surfaces = updated
         let previous = tracked
         tracked = newTracked
@@ -411,10 +426,14 @@ public struct SnowSimulation {
 
         let exact = (geometry.minX - surface.minX - shift) / Surface.columnWidth + previous.columnResidual
         let offset = Int(exact.rounded())
-        let lost = surface.relocate(minX: geometry.minX, baseY: geometry.baseY, width: geometry.width, columnOffset: offset)
+        var lost = surface.relocate(minX: geometry.minX, baseY: geometry.baseY, width: geometry.width, columnOffset: offset)
 
         let depth = config.windowMaxHeight * 0.6
         let y = (geometry.baseY - depth)...geometry.baseY
+        // Snow pushed onto a neighboring screen moves there with the window; it only falls at an outer edge.
+        let inset = config.windowCornerInset
+        if window.minX + inset < bounds.minX && screenContinues(side: -1, y: window.minY) { lost.left = 0 }
+        if window.maxX - inset > bounds.maxX && screenContinues(side: 1, y: window.minY) { lost.right = 0 }
         if lost.left > 0 {
             spawnDebris(volume: lost.left, x: (geometry.minX - 4)...geometry.minX, y: y, inheritedVX: velocityX, outward: -1)
         }

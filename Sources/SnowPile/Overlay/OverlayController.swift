@@ -284,6 +284,11 @@ final class OverlayController {
         }
         for overlay in old { tearDown(overlay) }
         overlays = kept
+        let frames = overlays.map(\.renderer.screenFrameCG)
+        for overlay in overlays {
+            let own = overlay.renderer.screenFrameCG
+            overlay.renderer.withSimulation { $0.neighborScreens = frames.filter { $0 != own } }
+        }
         // Mouse handlers capture the index, so re-wire them after the order may have changed.
         for (index, overlay) in overlays.enumerated() {
             overlay.view.onMouse = { [weak self] phase, point in self?.handleMouse(index, phase, point) }

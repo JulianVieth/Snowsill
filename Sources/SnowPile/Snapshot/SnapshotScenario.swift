@@ -20,7 +20,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles, secondary]
 
     private static let pid: Int32 = 4242
 
@@ -172,6 +172,22 @@ struct SnapshotScenario {
             }
         )
     }()
+
+    /// A secondary screen right of and above the main screen (negative CG y), with a window that spans both.
+    /// Checks that everything is drawn in the right place in that screen's local coordinates.
+    static let secondary = SnapshotScenario(
+        name: "secondary",
+        summary: "Zweitbildschirm bei x 1710, y -333; ein Fenster ragt links auf den Hauptbildschirm, eins liegt ganz drauf",
+        screen: CGRect(x: 1710, y: -333, width: 1440, height: 900),
+        duration: 40,
+        captures: [20, 40],
+        windows: { _ in [
+            WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: 1500, y: -100, width: 600, height: 400)),
+            WindowInfo(number: 2, ownerPID: pid, bounds: CGRect(x: 2400, y: 0, width: 500, height: 350)),
+        ] },
+        focus: { _, _ in CGRect(x: 1710, y: -200, width: 1300, height: 300) },
+        prepare: { $0.fillGround(height: 20) }
+    )
 
     /// Only the ground, to judge how the drift builds up over time.
     static let ground = SnapshotScenario(

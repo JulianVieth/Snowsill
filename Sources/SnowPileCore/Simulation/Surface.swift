@@ -35,6 +35,10 @@ public struct Surface: Sendable {
     public private(set) var version = 0
     /// Changes when position or size change. The renderer rebuilds immediately then, so snow sticks to a moving window.
     public private(set) var geometryVersion = 0
+    /// Ends cut off by the screen edge (a window reaching onto the next screen) hold their snow like walls,
+    /// since the window continues there.
+    public var clippedLeft = false
+    public var clippedRight = false
     /// A wall between column `barrier - 1` and `barrier` that snow can't slide across (the plow blade).
     public var barrier: Int?
     /// Spilled volume not yet turned into flakes.
@@ -116,8 +120,8 @@ public struct Surface: Sendable {
 
         var spilled: (left: CGFloat, right: CGFloat) = (0, 0)
         if edges == .spill {
-            spilled.left = spillOff(column: 0, threshold: threshold)
-            spilled.right = spillOff(column: count - 1, threshold: threshold)
+            if !clippedLeft { spilled.left = spillOff(column: 0, threshold: threshold) }
+            if !clippedRight { spilled.right = spillOff(column: count - 1, threshold: threshold) }
         }
         if changed || spilled.left > 0 || spilled.right > 0 { version &+= 1 }
         return spilled
