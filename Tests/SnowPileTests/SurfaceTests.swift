@@ -22,6 +22,16 @@ import Testing
         #expect(makeSurface(width: 21).heights.count == 11)
     }
 
+    /// With a fractional minX, `(maxX - minX) / columnWidth` can come out a hair above the column count.
+    @Test func depositUpToRightEndStaysInBoundsForFractionalMinX() {
+        for step in 0..<2000 {
+            let minX = 1000 + CGFloat(step) * 0.0137
+            var surface = Surface(kind: .window(number: 1), minX: minX, baseY: 300, width: 600, maxHeight: 14, edges: .spill)
+            let added = surface.deposit(volume: 2.5, minX: surface.maxX - 3.5, maxX: surface.maxX + 0.1)
+            #expect(added > 0)
+        }
+    }
+
     @Test func depositSpreadsVolumeOverCoveredColumns() {
         var surface = makeSurface()
         // x 104...108 covers columns 2, 3 (and touches 4 at exactly 108 -> excluded)

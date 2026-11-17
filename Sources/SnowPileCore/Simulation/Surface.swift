@@ -62,7 +62,8 @@ public struct Surface: Sendable {
     @discardableResult
     public mutating func deposit(volume: CGFloat, minX lowerX: CGFloat, maxX upperX: CGFloat) -> CGFloat {
         let first = Int(((max(lowerX, minX) - minX) / Self.columnWidth).rounded(.down))
-        let last = Int(((min(upperX, maxX) - minX) / Self.columnWidth).rounded(.up)) - 1
+        // Clamped: with a fractional minX the division can land a hair above the column count.
+        let last = min(Int(((min(upperX, maxX) - minX) / Self.columnWidth).rounded(.up)) - 1, heights.count - 1)
         guard volume > 0, first <= last, first < heights.count, last >= 0 else { return 0 }
 
         let perColumn = volume / (CGFloat(last - first + 1) * Self.columnWidth)
