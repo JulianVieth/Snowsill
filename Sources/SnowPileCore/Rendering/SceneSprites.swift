@@ -8,6 +8,7 @@ public enum SceneSprites {
         _ simulation: SnowSimulation, into writer: inout SpriteWriter, windowOffset: (Int) -> CGVector = { _ in .zero }
     ) {
         writePlow(simulation, into: &writer)
+        writeIcicles(simulation, into: &writer, windowOffset: windowOffset)
         for stack in simulation.stacks {
             var offset = CGVector.zero
             if case .window(let number, _) = stack.support { offset = windowOffset(number) }
@@ -15,6 +16,24 @@ public enum SceneSprites {
         }
         if let ball = simulation.held {
             writer.add(.ball, at: ball.center, size: CGSize(width: ball.radius, height: ball.radius), seed: 0.37)
+        }
+    }
+
+    // MARK: - Icicles
+
+    static let ice = SIMD4<Float>(0.70, 0.90, 0.98, 0.95)
+
+    static func writeIcicles(_ simulation: SnowSimulation, into writer: inout SpriteWriter, windowOffset: (Int) -> CGVector) {
+        for number in simulation.icicleWindows {
+            guard let (bounds, icicles) = simulation.icicles(ofWindow: number) else { continue }
+            let offset = windowOffset(number)
+            for icicle in icicles where !icicle.isHidden && icicle.length >= 1 {
+                let x = bounds.minX + icicle.offset + offset.dx
+                // Starts a hair inside the window so it visibly hangs from the edge.
+                let top = bounds.maxY + offset.dy - 0.5
+                writer.add(.icicle, at: CGPoint(x: x, y: top + icicle.length / 2),
+                           size: CGSize(width: icicle.width / 2, height: icicle.length / 2), color: ice, seed: icicle.seed)
+            }
         }
     }
 

@@ -20,7 +20,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow, snowman, icicles]
 
     private static let pid: Int32 = 4242
 
@@ -137,6 +137,38 @@ struct SnapshotScenario {
                     return (roll.drop, false)
                 }
                 return nil
+            }
+        )
+    }()
+
+    /// Icicles grow under two snowy windows (faster than normal), then one is flicked sideways and they break off,
+    /// the other closes.
+    static let icicles: SnapshotScenario = {
+        var config = SnowConfig()
+        config.icicleDelay = 4
+        config.icicleGrowth = 0.8
+        config.icicleSpawnInterval = 1...3
+        return SnapshotScenario(
+            name: "icicles",
+            summary: "Eiszapfen wachsen (beschleunigt), 30–30,25 s linkes Fenster schnell nach links, 33 s rechtes schließen",
+            duration: 36,
+            captures: [10, 20, 29.9, 30.1, 30.3, 30.6, 32.9, 33.2, 33.6, 36],
+            windows: { t in
+                var result: [WindowInfo] = []
+                let x = lerp(260, 60, (t - 30) / 0.25)
+                result.append(WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: x, y: 260, width: 520, height: 300)))
+                if t < 33 { result.append(WindowInfo(number: 2, ownerPID: pid, bounds: CGRect(x: 860, y: 340, width: 440, height: 260))) }
+                return result
+            },
+            focus: { _, _ in CGRect(x: 40, y: 200, width: 1300, height: 500) },
+            config: config,
+            prepare: { sim in
+                sim.setWindows([
+                    WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: 260, y: 260, width: 520, height: 300)),
+                    WindowInfo(number: 2, ownerPID: pid, bounds: CGRect(x: 860, y: 340, width: 440, height: 260)),
+                ], timestamp: 0)
+                sim.fillWindow(1, height: 9)
+                sim.fillWindow(2, height: 9)
             }
         )
     }()

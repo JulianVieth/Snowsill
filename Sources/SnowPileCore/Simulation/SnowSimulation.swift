@@ -36,6 +36,15 @@ public struct SnowConfig: Sendable {
 
     public var snowmenEnabled = true
     public var iciclesEnabled = true
+    /// Mean snow height on a window that lets icicles grow.
+    public var icicleSnowHeight: CGFloat = 3
+    /// Seconds of lying snow before the first icicle appears.
+    public var icicleDelay: Double = 25
+    public var icicleSpawnInterval: ClosedRange<Double> = 6...16
+    /// Growth in pt per second.
+    public var icicleGrowth: CGFloat = 0.12
+    /// Window speed (pt/s) that breaks icicles off.
+    public var icicleBreakSpeed: CGFloat = 700
     public var plowEnabled = true
     /// Mean ground height (pt) that calls the plow.
     public var plowThreshold: CGFloat = 22
@@ -88,7 +97,7 @@ public struct SnowSimulation {
     var freeSlots: ContiguousArray<Int>
     private var spawnAccumulator: Double = 0
     var rng: SplitMix64
-    private struct TrackedWindow {
+    struct TrackedWindow {
         /// Bounds the surface was last laid out for. Jitter below `moveTolerance` doesn't update them,
         /// so slow drifts still add up to a move.
         var bounds: CGRect
@@ -97,6 +106,7 @@ public struct SnowSimulation {
         var columnResidual: CGFloat
         /// Smoothed velocity of the window's top-left corner (pt/s), zero while resizing or standing still.
         var velocity: CGVector = .zero
+        var isWidget = false
     }
 
     /// Seconds of simulated time.
@@ -109,7 +119,8 @@ public struct SnowSimulation {
     /// Horizontal wind speed (pt/s) acting on all particles.
     public internal(set) var windX: CGFloat = 0
 
-    private var tracked: [Int: TrackedWindow] = [:]
+    var tracked: [Int: TrackedWindow] = [:]
+    var icicleGroups: [Int: IcicleGroup] = [:]
     private var nextSurfaceID = 1
 
     /// `screenIndex` names the ground surface; each screen runs its own simulation.
@@ -212,6 +223,7 @@ public struct SnowSimulation {
 
         stepPlow(dt: t)
         stepStacks(dt: t)
+        stepIcicles(dt: t)
 
         for i in surfaces.indices {
             let spilled = surfaces[i].relax()
@@ -315,14 +327,16 @@ public struct SnowSimulation {
                 }
             }
             newTracked[window.number] = TrackedWindow(
-                bounds: window.bounds, timestamp: timestamp, columnResidual: residual, velocity: velocity
+                bounds: window.bounds, timestamp: timestamp, columnResidual: residual, velocity: velocity, isWidget: window.isWidget
             )
         }
 
         for surface in existing.values { powderize(surface) }
         surfaces = updated
+        let previous = tracked
         tracked = newTracked
         updateOcclusion(windows)
+        updateIcicles(previous: previous, windows: windows)
     }
 
     /// Hides the columns of each window edge that a window further in front covers.
@@ -614,6 +628,7 @@ public struct SnowSimulation {
         for i in surfaces.indices { surfaces[i].clear() }
         stacks.removeAll()
         held = nil
+        icicleGroups.removeAll()
     }
 
     /// Fills the ground with an irregular layer around `height`, for scenarios that start with deep snow.
@@ -625,6 +640,11 @@ public struct SnowSimulation {
             let h = height * (1 + 0.15 * Noise.fractal(x / 80, seed: 5))
             surfaces[g].deposit(volume: h * Surface.columnWidth, minX: x, maxX: x + Surface.columnWidth)
         }
+    }
+
+    /// Puts an even layer of snow on a window, for scenarios.
+    public mutating func fillWindow(_ number: Int, height: CGFloat) {
+        modifySurface(.window(number: number)) { $0.deposit(volume: CGFloat($0.heights.count) * Surface.columnWidth * height, minX: $0.minX, maxX: $0.maxX) }
     }
 
     mutating func addTestFlake(at position: CGPoint, volume: CGFloat) {
