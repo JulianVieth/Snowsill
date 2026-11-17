@@ -51,9 +51,9 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var debugFrames = 0
     private var debugElapsed: CFTimeInterval = 0
 
-    convenience init?(view: MTKView, screenFrameCG: CGRect, debug: Bool) {
+    convenience init?(view: MTKView, screenFrameCG: CGRect, config: SnowConfig, debug: Bool) {
         guard let device = view.device else { return nil }
-        self.init(device: device, pixelFormat: view.colorPixelFormat, screenFrameCG: screenFrameCG, debug: debug)
+        self.init(device: device, pixelFormat: view.colorPixelFormat, screenFrameCG: screenFrameCG, config: config, debug: debug)
         if debug {
             let label = NSTextField(labelWithString: "")
             label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -65,12 +65,12 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     }
 
     /// Without a view, for offscreen rendering (snapshot mode). A fixed `seed` makes runs repeatable.
-    init?(device: MTLDevice, pixelFormat: MTLPixelFormat, screenFrameCG: CGRect, debug: Bool, seed: UInt64? = nil) {
+    init?(device: MTLDevice, pixelFormat: MTLPixelFormat, screenFrameCG: CGRect, config: SnowConfig, debug: Bool, seed: UInt64? = nil) {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.screenFrameCG = screenFrameCG
         self.debug = debug
         self.device = device
-        simulation = SnowSimulation(bounds: screenFrameCG, seed: seed ?? UInt64.random(in: .min ... .max))
+        simulation = SnowSimulation(config: config, bounds: screenFrameCG, seed: seed ?? UInt64.random(in: .min ... .max))
         commandQueue = queue
         surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
 
@@ -275,6 +275,11 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
               let motion = simulation.motion(ofWindow: number), motion.velocity != .zero else { return .zero }
         let horizon = CGFloat(min(max(now - motion.timestamp + Self.displayLatency, 0), Self.maxPrediction))
         return CGVector(dx: motion.velocity.dx * horizon, dy: motion.velocity.dy * horizon)
+    }
+
+    /// Direct access for snapshot scenarios that need a prepared state.
+    func withSimulation(_ body: (inout SnowSimulation) -> Void) {
+        body(&simulation)
     }
 
     func setWindows(_ windows: [WindowInfo], timestamp: CFTimeInterval) {

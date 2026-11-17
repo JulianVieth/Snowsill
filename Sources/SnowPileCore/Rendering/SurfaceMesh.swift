@@ -102,13 +102,12 @@ public enum SurfaceMesh {
         let castsShadow: Bool
         if case .ground = surface.kind { castsShadow = false } else { castsShadow = true }
 
-        var previousVisual: Float = 0
-        var visual = Float(visualHeight(surface, edge: 0, trueHeight: edgeHeight(surface, edge: 0)))
+        var previousHeight = Float(edgeHeight(surface, edge: 0))
+        var height = previousHeight
         for edge in 0...columns {
-            let h = edgeHeight(surface, edge: edge)
-            let nextVisual = edge < columns
-                ? Float(visualHeight(surface, edge: edge + 1, trueHeight: edgeHeight(surface, edge: edge + 1)))
-                : visual
+            let h = CGFloat(height)
+            let nextHeight = edge < columns ? Float(edgeHeight(surface, edge: edge + 1)) : height
+            let visual = Float(visualHeight(surface, edge: edge, trueHeight: h))
             // Fade in over the first point so an empty surface draws nothing.
             let alpha = Float(min(h, 1))
             let x = baseX + Float(edge) * width
@@ -116,7 +115,8 @@ public enum SurfaceMesh {
             let middleY = baseY + visual * 0.55
 
             // Light from the upper left: slopes facing left are a touch brighter, facing right a touch darker.
-            let slope = (nextVisual - previousVisual) / (2 * width)
+            // Slope of the smoothed snow, not of the visual noise, so the ragged edge doesn't turn into stripes.
+            let slope = (nextHeight - previousHeight) / (2 * width)
             let light = min(max(1 + 0.1 * slope, 0.88), 1)
             // Thin snow shows little depth, so its base stays bright.
             let depth = min(visual / 6, 1)
@@ -138,8 +138,8 @@ public enum SurfaceMesh {
             buffer[3 * strip + 2 * edge] = SurfaceVertex(x, baseY, SIMD4(shadowColor * shadow, shadow))
             buffer[3 * strip + 2 * edge + 1] = SurfaceVertex(x, baseY - shadowDepth, .zero)
 
-            previousVisual = visual
-            visual = nextVisual
+            previousHeight = height
+            height = nextHeight
         }
         return total
     }

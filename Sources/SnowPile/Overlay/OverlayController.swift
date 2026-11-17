@@ -103,7 +103,7 @@ final class OverlayController {
         (view.layer as? CAMetalLayer)?.maximumDrawableCount = 2
 
         let screenFrameCG = Coordinates.cgRect(fromAppKit: mainScreen.frame, mainScreenHeight: mainHeight)
-        guard let renderer = SnowRenderer(view: view, screenFrameCG: screenFrameCG, debug: debug) else { return }
+        guard let renderer = SnowRenderer(view: view, screenFrameCG: screenFrameCG, config: SnowConfig(), debug: debug) else { return }
         view.delegate = renderer
         window.contentView = view
         window.orderFrontRegardless()

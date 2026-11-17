@@ -22,7 +22,7 @@ enum SnapshotRunner {
 
         let screen = scenario.screen
         guard let device = MTLCreateSystemDefaultDevice(),
-              let renderer = SnowRenderer(device: device, pixelFormat: .bgra8Unorm, screenFrameCG: screen, debug: debug, seed: 42)
+              let renderer = SnowRenderer(device: device, pixelFormat: .bgra8Unorm, screenFrameCG: screen, config: scenario.config, debug: debug, seed: 42)
         else {
             FileHandle.standardError.write("Metal nicht verfügbar\n".data(using: .utf8)!)
             return 1
@@ -35,6 +35,7 @@ enum SnapshotRunner {
         descriptor.storageMode = .shared
         guard let texture = device.makeTexture(descriptor: descriptor) else { return 1 }
 
+        renderer.withSimulation { scenario.prepare(&$0) }
         var tracker = TrackerModel()
         var captures = scenario.captures.sorted()[...]
         var sheetFrames: [(time: Double, image: CGImage)] = []

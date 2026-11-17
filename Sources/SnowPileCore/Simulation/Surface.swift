@@ -35,6 +35,8 @@ public struct Surface: Sendable {
     public private(set) var version = 0
     /// Changes when position or size change. The renderer rebuilds immediately then, so snow sticks to a moving window.
     public private(set) var geometryVersion = 0
+    /// A wall between column `barrier - 1` and `barrier` that snow can't slide across (the plow blade).
+    public var barrier: Int?
     /// Spilled volume not yet turned into flakes.
     var spillCredit: (left: CGFloat, right: CGFloat) = (0, 0)
 
@@ -151,6 +153,42 @@ public struct Surface: Sendable {
         return lost
     }
 
+    /// Lowers a column to at most `height` and returns the removed volume.
+    @discardableResult
+    public mutating func scrape(column: Int, to height: CGFloat) -> CGFloat {
+        guard heights.indices.contains(column), heights[column] > height else { return 0 }
+        let removed = (heights[column] - max(height, 0)) * Self.columnWidth
+        heights[column] = max(height, 0)
+        version &+= 1
+        return removed
+    }
+
+    /// Removes up to `depth` from a column (never below 0) and returns the removed volume.
+    @discardableResult
+    public mutating func take(column: Int, depth: CGFloat) -> CGFloat {
+        guard heights.indices.contains(column), depth > 0, heights[column] > 0 else { return 0 }
+        let taken = min(depth, heights[column])
+        heights[column] -= taken
+        version &+= 1
+        return taken * Self.columnWidth
+    }
+
+    /// Melts `depth` off every column. Returns the melted volume.
+    @discardableResult
+    public mutating func melt(depth: CGFloat) -> CGFloat {
+        guard depth > 0 else { return 0 }
+        var melted: CGFloat = 0
+        for i in heights.indices where heights[i] > 0 {
+            let d = min(depth, heights[i])
+            heights[i] -= d
+            melted += d
+        }
+        if melted > 0 { version &+= 1 }
+        return melted * Self.columnWidth
+    }
+
+    public var meanHeight: CGFloat { heights.isEmpty ? 0 : heights.reduce(0, +) / CGFloat(heights.count) }
+
     public mutating func clear() {
         spillCredit = (0, 0)
         guard heights.contains(where: { $0 > 0 }) else { return }
@@ -159,6 +197,7 @@ public struct Surface: Sendable {
     }
 
     private mutating func settle(_ a: Int, _ b: Int, threshold: CGFloat) -> Bool {
+        if let barrier, b == barrier { return false }
         let diff = heights[a] - heights[b]
         guard abs(diff) > threshold else { return false }
         // Move half the excess so the pair ends up exactly at the threshold.

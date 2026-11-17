@@ -28,6 +28,18 @@ public struct SnowConfig: Sendable {
     /// Share of the movement beyond `slipSpeed` that the snow lags behind.
     public var slipFactor: CGFloat = 0.6
 
+    /// Height (pt per second) that lying snow loses by melting. Faster after a while without new snow.
+    public var meltRate: CGFloat = 0.01
+    /// Scales the breeze and gusts; 0 is calm.
+    public var windStrength: CGFloat = 1
+
+    public var plowEnabled = true
+    /// Mean ground height (pt) that calls the plow.
+    public var plowThreshold: CGFloat = 22
+    /// Minimum seconds between two plow runs.
+    public var plowInterval: Double = 240
+    public var plowSpeed: CGFloat = 120
+
     public init() {}
 }
 
@@ -56,15 +68,15 @@ public struct SnowSimulation {
     /// Window bounds changes below this count as jitter, not as a move.
     static let moveTolerance: CGFloat = 0.5
 
-    public let config: SnowConfig
+    public internal(set) var config: SnowConfig
     /// Area flakes fall through, in CG coordinates.
     public var bounds: CGRect
-    public private(set) var flakes: ContiguousArray<Flake>
-    public private(set) var activeCount = 0
+    public internal(set) var flakes: ContiguousArray<Flake>
+    public internal(set) var activeCount = 0
     /// Active flakes of regular snowfall, limited to `config.maxFlakes`. Powder comes on top.
-    public private(set) var snowfallCount = 0
+    public internal(set) var snowfallCount = 0
     /// Ground first, then window surfaces in front-to-back order.
-    public private(set) var surfaces: ContiguousArray<Surface> = []
+    public internal(set) var surfaces: ContiguousArray<Surface> = []
 
     var freeSlots: ContiguousArray<Int>
     private var spawnAccumulator: Double = 0
@@ -79,6 +91,10 @@ public struct SnowSimulation {
         /// Smoothed velocity of the window's top-left corner (pt/s), zero while resizing or standing still.
         var velocity: CGVector = .zero
     }
+
+    /// Seconds of simulated time.
+    public internal(set) var time: Double = 0
+    public internal(set) var plow = Plow()
 
     /// Horizontal wind speed (pt/s) acting on all particles.
     public internal(set) var windX: CGFloat = 0
@@ -113,6 +129,7 @@ public struct SnowSimulation {
     public mutating func step(dt rawDt: Double) {
         guard rawDt > 0 else { return }
         let dt = min(rawDt, Self.maxStep)
+        time += dt
 
         spawnAccumulator += config.spawnRate * Double(bounds.width / 1000) * dt
         while spawnAccumulator >= 1 {
@@ -137,7 +154,8 @@ public struct SnowSimulation {
             if flake.kind == .puff {
                 flake.life -= t
                 done = flake.life <= 0
-            } else {
+            } else if flake.velocity.dy > 0 {
+                // Only falling particles land; thrown ones first fly up and away.
                 done = land(flake, previousY: previousY)
             }
             if done
@@ -151,6 +169,8 @@ public struct SnowSimulation {
             }
             flakes[i] = flake
         }
+
+        stepPlow(dt: t)
 
         for i in surfaces.indices {
             let spilled = surfaces[i].relax()
@@ -172,7 +192,7 @@ public struct SnowSimulation {
             // growing snow rose past since the last step.
             guard previousY <= surfaces[s].baseY, flake.position.y >= surfaces[s].topY(atColumn: column) else { continue }
             if flake.kind != .ice {
-                surfaces[s].deposit(volume: flake.snowVolume, minX: x - flake.radius, maxX: x + flake.radius)
+                depositSpreading(surface: s, volume: flake.snowVolume, x: x, radius: flake.radius)
             }
             if flake.kind == .clump {
                 burst(at: CGPoint(x: x, y: surfaces[s].topY(atColumn: column)), radius: flake.radius)
@@ -180,6 +200,17 @@ public struct SnowSimulation {
             return true
         }
         return false
+    }
+
+    /// Deposits `volume` around `x`. Where the columns are already full, the rest spreads wider, so snow isn't lost
+    /// just because it landed on a full spot. Only a surface that is full everywhere nearby drops the remainder.
+    mutating func depositSpreading(surface s: Int, volume: CGFloat, x: CGFloat, radius: CGFloat) {
+        var remaining = volume - surfaces[s].deposit(volume: volume, minX: x - radius, maxX: x + radius)
+        var reach = max(radius, Surface.columnWidth) * 2
+        while remaining > 1e-9, reach < 400 {
+            remaining -= surfaces[s].deposit(volume: remaining, minX: x - reach, maxX: x + reach)
+            reach *= 2
+        }
     }
 
     /// How strongly the wind pushes a particle: small, light ones more.
@@ -531,6 +562,17 @@ public struct SnowSimulation {
         snowfallCount = 0
         spawnAccumulator = 0
         for i in surfaces.indices { surfaces[i].clear() }
+    }
+
+    /// Fills the ground with an irregular layer around `height`, for scenarios that start with deep snow.
+    public mutating func fillGround(height: CGFloat) {
+        guard let g = surfaces.firstIndex(where: { if case .ground = $0.kind { return true } else { return false } }) else { return }
+        let surface = surfaces[g]
+        for c in surface.heights.indices {
+            let x = surface.minX + CGFloat(c) * Surface.columnWidth
+            let h = height * (1 + 0.15 * Noise.fractal(x / 80, seed: 5))
+            surfaces[g].deposit(volume: h * Surface.columnWidth, minX: x, maxX: x + Surface.columnWidth)
+        }
     }
 
     mutating func addTestFlake(at position: CGPoint, volume: CGFloat) {

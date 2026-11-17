@@ -12,10 +12,13 @@ struct SnapshotScenario {
     var windows: (Double) -> [WindowInfo]
     /// Region for the 2× detail crop, or nil for none.
     var focus: (Double, [WindowInfo]) -> CGRect?
+    var config = SnowConfig()
+    /// Runs once before the first frame, e.g. to pre-fill the ground.
+    var prepare: (inout SnowSimulation) -> Void = { _ in }
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground, overlap]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap, plow]
 
     private static let pid: Int32 = 4242
 
@@ -73,6 +76,23 @@ struct SnapshotScenario {
         },
         focus: { _, _ in CGRect(x: 180, y: 200, width: 900, height: 200) }
     )
+
+    /// Deep ground snow, then the plow crosses from left to right and pushes the wall off the screen.
+    static let plow: SnapshotScenario = {
+        var config = SnowConfig()
+        config.plowInterval = 2
+        config.plowThreshold = 20
+        return SnapshotScenario(
+            name: "plow",
+            summary: "Boden mit ca. 32 pt vorbefüllt, ab 2 s fährt der Schaufler von links nach rechts",
+            duration: 18,
+            captures: [1.5, 3, 5, 7, 9, 11, 12.5, 13.5, 15, 18],
+            windows: { _ in [] },
+            focus: { _, _ in CGRect(x: 0, y: 760, width: 1440, height: 140) },
+            config: config,
+            prepare: { $0.fillGround(height: 32) }
+        )
+    }()
 
     /// Only the ground, to judge how the drift builds up over time.
     static let ground = SnapshotScenario(
