@@ -27,6 +27,10 @@ public struct Surface: Sendable {
     public let maxHeight: CGFloat
     public let edges: Edges
     public private(set) var heights: ContiguousArray<CGFloat>
+    /// Columns covered by a window in front. They keep their snow but receive none and aren't drawn.
+    public private(set) var hidden: ContiguousArray<Bool>
+    /// Whether any column is hidden, so the common case skips the per-column check.
+    public private(set) var hasHidden = false
     /// Changes whenever the heightmap changes, so the renderer only rebuilds when needed.
     public private(set) var version = 0
     /// Changes when position or size change. The renderer rebuilds immediately then, so snow sticks to a moving window.
@@ -43,6 +47,26 @@ public struct Surface: Sendable {
         self.edges = edges
         let count = max(Int((width / Self.columnWidth).rounded(.up)), 1)
         heights = ContiguousArray(repeating: 0, count: count)
+        hidden = ContiguousArray(repeating: false, count: count)
+    }
+
+    @inline(__always)
+    public func isHidden(_ column: Int) -> Bool {
+        hasHidden && hidden[column]
+    }
+
+    /// Marks every column whose center lies outside all `visible` x ranges as hidden.
+    public mutating func setVisible(_ visible: [ClosedRange<CGFloat>]) {
+        var any = false
+        var changed = false
+        for i in hidden.indices {
+            let x = minX + (CGFloat(i) + 0.5) * Self.columnWidth
+            let isHidden = !visible.contains { $0.contains(x) }
+            if hidden[i] != isHidden { hidden[i] = isHidden; changed = true }
+            any = any || isHidden
+        }
+        hasHidden = any
+        if changed { version &+= 1 }
     }
 
     public var maxX: CGFloat { minX + CGFloat(heights.count) * Self.columnWidth }
@@ -116,6 +140,10 @@ public struct Surface: Sendable {
             }
         }
         heights = newHeights
+        if hidden.count != newCount || hasHidden {
+            hidden = ContiguousArray(repeating: false, count: newCount)
+            hasHidden = false
+        }
         minX = newMinX
         baseY = newBaseY
         geometryVersion &+= 1

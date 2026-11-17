@@ -215,9 +215,12 @@ import Testing
         sim.setWindows([], timestamp: 0.1)
         #expect(windowSurface(sim) == nil)
         #expect(abs(airborneVolume(sim) - 3000) < 1e-6)
-        let powder = sim.flakes.filter(\.isActive)
-        #expect(powder.count > 100)
-        #expect(powder.allSatisfy { $0.radius <= SnowConfig().powderRadiusRange.upperBound })
+        let debris = sim.flakes.filter(\.isActive)
+        #expect(debris.count > 60)
+        // Clumps and powder, like the reference video.
+        #expect(debris.contains { $0.kind == .clump })
+        #expect(debris.contains { $0.kind == .powder })
+        #expect(debris.allSatisfy { $0.radius <= SnowConfig().clumpRadiusRange.upperBound })
     }
 
     @Test func fullWindowFitsIntoThePowderPool() {
@@ -245,10 +248,10 @@ import Testing
         let airborne = sim.flakes.filter(\.isActive)
         #expect(!airborne.isEmpty)
         #expect(airborne.allSatisfy { $0.position.x < surface.minX })
-        #expect(airborne.allSatisfy { $0.radius <= SnowConfig().powderRadiusRange.upperBound })
+        #expect(airborne.allSatisfy { $0.radius <= SnowConfig().clumpRadiusRange.upperBound })
         let total = surface.totalVolume + airborneVolume(sim)
         #expect(total <= 200 + 1e-6)
-        #expect(total > 200 - SnowConfig().powderVolume)
+        #expect(total > 200 - SnowConfig().clumpVolumeRange.lowerBound)
     }
 
     @Test func regularSnowfallNeverUsesThePowderPool() {
@@ -273,6 +276,20 @@ import Testing
         sim.step(dt: 1.0 / 60)
         #expect(sim.snowfallCount == 100)
         #expect(sim.activeCount > 100)
+    }
+
+    @Test func clumpsBurstIntoPuffsWithoutCreatingSnow() {
+        var sim = simWithSnow(3000, seed: 21)
+        sim.setWindows([], timestamp: 0.1)
+        var sawPuff = false
+        for _ in 0..<(60 * 20) {
+            sim.step(dt: 1.0 / 60)
+            sawPuff = sawPuff || sim.flakes.contains { $0.isActive && $0.kind == .puff }
+            // Puffs carry nothing; volume lives only in the debris and on surfaces.
+            #expect(sim.flakes.allSatisfy { !$0.isActive || $0.kind != .puff || $0.snowVolume == 0 })
+        }
+        #expect(sawPuff)
+        #expect(abs(sim.surfaces[0].totalVolume + airborneVolume(sim) - 3000) < 1e-6)
     }
 
     @Test func resetClearsWindowSnow() throws {

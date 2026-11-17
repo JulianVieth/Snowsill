@@ -14,9 +14,12 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     /// Never extrapolate further than this, in case updates stop arriving.
     private static let maxPrediction: CFTimeInterval = 0.1
 
+    /// Sprites beyond the particle pool: snowballs, snowmen, plow, icicles.
+    static let extraSprites = 4096
+
     private struct SurfaceRange {
-        var bodyStart: Int
-        var bodyCount: Int
+        var start: Int
+        var stripLength: Int
         var debugStart: Int
     }
 
@@ -25,7 +28,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var simulation: SnowSimulation
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private let flakePipeline: MTLRenderPipelineState
+    private let spritePipeline: MTLRenderPipelineState
     private let surfacePipeline: MTLRenderPipelineState
     private let instanceBuffers: [MTLBuffer]
     private let inFlight = DispatchSemaphore(value: SnowRenderer.maxFramesInFlight)
@@ -73,14 +76,14 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
         do {
             let library = try device.makeLibrary(source: Shaders.source, options: nil)
-            flakePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "flakeVertex", fragment: "flakeFragment")
+            spritePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "spriteVertex", fragment: "spriteFragment")
             surfacePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "surfaceVertex", fragment: "surfaceFragment")
         } catch {
             NSLog("SnowPile: Metal pipeline failed: \(error)")
             return nil
         }
 
-        let length = MemoryLayout<FlakeInstance>.stride * max(simulation.flakes.count, 1)
+        let length = MemoryLayout<Sprite>.stride * (simulation.flakes.count + Self.extraSprites)
         var buffers: [MTLBuffer] = []
         for _ in 0..<Self.maxFramesInFlight {
             guard let buffer = device.makeBuffer(length: length, options: .storageModeShared) else { return nil }
@@ -170,8 +173,9 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             encoder.setVertexBuffer(surfaceBuffer, offset: 0, index: 0)
             encoder.setVertexBytes(&viewSize, length: viewSizeLength, index: 1)
             for range in meshRanges {
-                encoder.drawPrimitives(type: .triangleStrip, vertexStart: range.bodyStart, vertexCount: range.bodyCount)
-                encoder.drawPrimitives(type: .triangleStrip, vertexStart: range.bodyStart + range.bodyCount, vertexCount: range.bodyCount)
+                for strip in 0..<SurfaceMesh.stripCount {
+                    encoder.drawPrimitives(type: .triangleStrip, vertexStart: range.start + strip * range.stripLength, vertexCount: range.stripLength)
+                }
                 if debug {
                     encoder.drawPrimitives(type: .line, vertexStart: range.debugStart, vertexCount: 2)
                 }
@@ -179,18 +183,16 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         }
 
         let buffer = instanceBuffers[index]
-        let capacity = buffer.length / MemoryLayout<FlakeInstance>.stride
-        let pointer = buffer.contents().bindMemory(to: FlakeInstance.self, capacity: capacity)
-        let count = FlakeInstances.pack(
-            simulation.flakes,
-            screenFrameCG: screenFrameCG,
-            into: UnsafeMutableBufferPointer(start: pointer, count: capacity)
-        )
-        if count > 0 {
-            encoder.setRenderPipelineState(flakePipeline)
+        let capacity = buffer.length / MemoryLayout<Sprite>.stride
+        let pointer = buffer.contents().bindMemory(to: Sprite.self, capacity: capacity)
+        var writer = SpriteWriter(buffer: UnsafeMutableBufferPointer(start: pointer, count: capacity), screenFrameCG: screenFrameCG)
+        SceneSprites.write(simulation, into: &writer)
+        FlakeSprites.pack(simulation.flakes, into: &writer)
+        if writer.count > 0 {
+            encoder.setRenderPipelineState(spritePipeline)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             encoder.setVertexBytes(&viewSize, length: viewSizeLength, index: 1)
-            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: writer.count)
         }
     }
 
@@ -224,7 +226,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
                     surface, screenFrameCG: screenFrameCG, offset: predicted,
                     into: UnsafeMutableBufferPointer(rebasing: out[offset..<(offset + count)])
                 )
-                var range = SurfaceRange(bodyStart: offset, bodyCount: count / 2, debugStart: -1)
+                var range = SurfaceRange(start: offset, stripLength: SurfaceMesh.stripLength(for: surface), debugStart: -1)
                 offset += count
                 if debug {
                     let red = SIMD4<Float>(1, 0, 0, 1)

@@ -19,6 +19,10 @@ public struct SnowConfig: Sendable {
     public var powderRadiusRange: ClosedRange<CGFloat> = 1.0...2.0
     /// Volume each powder particle carries. Raised automatically when the pool would not suffice.
     public var powderVolume: CGFloat = 2.5
+    /// Share of fallen-off snow that comes down as coarse clumps instead of powder.
+    public var clumpShare: CGFloat = 0.65
+    public var clumpVolumeRange: ClosedRange<CGFloat> = 14...50
+    public var clumpRadiusRange: ClosedRange<CGFloat> = 2.2...6.5
     /// Horizontal window speed (pt/s) above which the snow can no longer keep up and starts sliding off.
     public var slipSpeed: CGFloat = 900
     /// Share of the movement beyond `slipSpeed` that the snow lags behind.
@@ -62,9 +66,9 @@ public struct SnowSimulation {
     /// Ground first, then window surfaces in front-to-back order.
     public private(set) var surfaces: ContiguousArray<Surface> = []
 
-    private var freeSlots: ContiguousArray<Int>
+    var freeSlots: ContiguousArray<Int>
     private var spawnAccumulator: Double = 0
-    private var rng: SplitMix64
+    var rng: SplitMix64
     private struct TrackedWindow {
         /// Bounds the surface was last laid out for. Jitter below `moveTolerance` doesn't update them,
         /// so slow drifts still add up to a move.
@@ -75,6 +79,9 @@ public struct SnowSimulation {
         /// Smoothed velocity of the window's top-left corner (pt/s), zero while resizing or standing still.
         var velocity: CGVector = .zero
     }
+
+    /// Horizontal wind speed (pt/s) acting on all particles.
+    public internal(set) var windX: CGFloat = 0
 
     private var tracked: [Int: TrackedWindow] = [:]
     private var nextSurfaceID = 1
@@ -119,13 +126,21 @@ public struct SnowSimulation {
         for i in flakes.indices where flakes[i].isActive {
             var flake = flakes[i]
             let previousY = flake.position.y
-            flake.velocity.dx += (flake.driftX - flake.velocity.dx) * relax
+            flake.velocity.dx += (flake.driftX + windX * windResponse(flake) - flake.velocity.dx) * relax
             flake.velocity.dy += (flake.fallSpeed - flake.velocity.dy) * relax
             flake.swayPhase += Self.swayFrequency * t
+            flake.rotation += flake.spin * t
             flake.position.x += (flake.velocity.dx + sin(flake.swayPhase) * flake.swayAmplitude) * t
             flake.position.y += flake.velocity.dy * t
 
-            if land(flake, previousY: previousY)
+            var done = false
+            if flake.kind == .puff {
+                flake.life -= t
+                done = flake.life <= 0
+            } else {
+                done = land(flake, previousY: previousY)
+            }
+            if done
                 || flake.position.y - flake.radius > bounds.maxY
                 || flake.position.x < bounds.minX - margin
                 || flake.position.x > bounds.maxX + margin {
@@ -152,14 +167,29 @@ public struct SnowSimulation {
     private mutating func land(_ flake: Flake, previousY: CGFloat) -> Bool {
         let x = flake.position.x
         for s in surfaces.indices {
-            guard let column = surfaces[s].column(at: x) else { continue }
+            guard let column = surfaces[s].column(at: x), !surfaces[s].isHidden(column) else { continue }
             // Was above the edge before, is at or below the snow top now. Also catches flakes that the
             // growing snow rose past since the last step.
             guard previousY <= surfaces[s].baseY, flake.position.y >= surfaces[s].topY(atColumn: column) else { continue }
-            surfaces[s].deposit(volume: flake.snowVolume, minX: x - flake.radius, maxX: x + flake.radius)
+            if flake.kind != .ice {
+                surfaces[s].deposit(volume: flake.snowVolume, minX: x - flake.radius, maxX: x + flake.radius)
+            }
+            if flake.kind == .clump {
+                burst(at: CGPoint(x: x, y: surfaces[s].topY(atColumn: column)), radius: flake.radius)
+            }
             return true
         }
         return false
+    }
+
+    /// How strongly the wind pushes a particle: small, light ones more.
+    @inline(__always)
+    private func windResponse(_ flake: Flake) -> CGFloat {
+        switch flake.kind {
+        case .clump, .ice: return 0.25
+        case .puff: return 0.6
+        case .snow, .powder: return 1.4 - min(flake.radius, 4) * 0.15
+        }
     }
 
     // MARK: - Windows
@@ -277,11 +307,11 @@ public struct SnowSimulation {
         let depth = config.windowMaxHeight * 0.6
         let y = (geometry.baseY - depth)...geometry.baseY
         if lost.left > 0 {
-            spawnPowder(volume: lost.left, x: (geometry.minX - 4)...geometry.minX, y: y, inheritedVX: velocityX, outward: -1)
+            spawnDebris(volume: lost.left, x: (geometry.minX - 4)...geometry.minX, y: y, inheritedVX: velocityX, outward: -1)
         }
         if lost.right > 0 {
             let maxX = surface.maxX
-            spawnPowder(volume: lost.right, x: maxX...(maxX + 4), y: y, inheritedVX: velocityX, outward: 1)
+            spawnDebris(volume: lost.right, x: maxX...(maxX + 4), y: y, inheritedVX: velocityX, outward: 1)
         }
         return exact - CGFloat(offset)
     }
@@ -293,69 +323,107 @@ public struct SnowSimulation {
         return Surface(kind: kind, minX: minX, baseY: baseY, width: width, maxHeight: maxHeight, edges: edges, id: nextSurfaceID)
     }
 
-    // MARK: - Powder
+    // MARK: - Falling snow (clumps and powder)
 
-    /// Volume per particle so that `volume` fits into the free slots.
-    private func powderParticleVolume(for volume: CGFloat) -> CGFloat {
-        max(config.powderVolume, volume / CGFloat(max(freeSlots.count, 1)))
+    /// Factor applied to every debris particle's volume so that `volume` fits into the free slots.
+    private func debrisScale(for volume: CGFloat) -> CGFloat {
+        let meanClump = (config.clumpVolumeRange.lowerBound + config.clumpVolumeRange.upperBound) / 2
+        let estimate = volume * (config.clumpShare / meanClump + (1 - config.clumpShare) / config.powderVolume)
+        return max(1, estimate / CGFloat(max(freeSlots.count, 1)))
     }
 
-    /// Turns all snow of a surface into powder, shaped like the layer it came from.
-    private mutating func powderize(_ surface: Surface) {
-        let perParticle = powderParticleVolume(for: surface.totalVolume)
+    /// Picks the volume of the next debris particle and whether it is a clump.
+    private mutating func nextDebris(remaining: CGFloat, scale: CGFloat) -> (volume: CGFloat, clump: Bool) {
+        let clump = CGFloat.random(in: 0..<1, using: &rng) < config.clumpShare
+        let base = clump ? CGFloat.random(in: config.clumpVolumeRange, using: &rng) : config.powderVolume
+        return (min(base * scale, remaining), clump)
+    }
+
+    /// Turns all snow of a surface into clumps and powder, shaped like the layer it came from.
+    mutating func powderize(_ surface: Surface) {
+        let scale = debrisScale(for: surface.totalVolume)
         var credit: CGFloat = 0
         var lastColumn = 0
+        var next = nextDebris(remaining: .infinity, scale: scale)
         for column in surface.heights.indices where surface.heights[column] > 0 {
             lastColumn = column
             credit += surface.heights[column] * Surface.columnWidth
-            while credit >= perParticle {
-                guard spawnPowderParticle(from: surface, column: column, volume: perParticle) else { return }
-                credit -= perParticle
+            while credit >= next.volume {
+                guard spawnDebrisParticle(from: surface, column: column, volume: next.volume, clump: next.clump) else { return }
+                credit -= next.volume
+                next = nextDebris(remaining: .infinity, scale: scale)
             }
         }
-        if credit > 1e-9 { spawnPowderParticle(from: surface, column: lastColumn, volume: credit) }
+        if credit > 1e-9 {
+            spawnDebrisParticle(from: surface, column: lastColumn, volume: credit, clump: credit >= config.clumpVolumeRange.lowerBound)
+        }
     }
 
     @discardableResult
-    private mutating func spawnPowderParticle(from surface: Surface, column: Int, volume: CGFloat) -> Bool {
+    private mutating func spawnDebrisParticle(from surface: Surface, column: Int, volume: CGFloat, clump: Bool) -> Bool {
         let height = surface.heights[column]
         let x = surface.minX + (CGFloat(column) + 0.5) * Surface.columnWidth + CGFloat.random(in: -1...1, using: &rng)
         let y = surface.topY(atColumn: column) + CGFloat.random(in: 0...height, using: &rng)
-        return spawnPowder(at: CGPoint(x: x, y: y), volume: volume, inheritedVX: 0, outward: 0)
+        return spawnDebris(at: CGPoint(x: x, y: y), volume: volume, clump: clump, inheritedVX: 0, outward: 0)
     }
 
-    /// Spawns powder carrying exactly `volume` (as long as the pool has room), spread over the given area.
-    private mutating func spawnPowder(
+    /// Spawns clumps and powder carrying exactly `volume` (as long as the pool has room), spread over the given area.
+    mutating func spawnDebris(
         volume: CGFloat, x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>, inheritedVX: CGFloat, outward: CGFloat
     ) {
-        let perParticle = powderParticleVolume(for: volume)
+        let scale = debrisScale(for: volume)
         var remaining = volume
         while remaining > 1e-9 {
-            let particle = min(perParticle, remaining)
+            let next = nextDebris(remaining: remaining, scale: scale)
             let position = CGPoint(x: CGFloat.random(in: x, using: &rng), y: CGFloat.random(in: y, using: &rng))
-            guard spawnPowder(at: position, volume: particle, inheritedVX: inheritedVX, outward: outward) else { return }
-            remaining -= particle
+            let clump = next.clump && next.volume >= config.clumpVolumeRange.lowerBound * 0.5
+            guard spawnDebris(at: position, volume: next.volume, clump: clump, inheritedVX: inheritedVX, outward: outward) else { return }
+            remaining -= next.volume
         }
     }
 
-    /// `outward` is -1 or 1 for powder sliding off an edge, 0 for powder from a whole layer.
+    /// `outward` is -1 or 1 for snow sliding off an edge, 0 for a whole layer dropping.
     @discardableResult
-    private mutating func spawnPowder(at position: CGPoint, volume: CGFloat, inheritedVX: CGFloat, outward: CGFloat) -> Bool {
-        let radius = CGFloat.random(in: config.powderRadiusRange, using: &rng)
+    mutating func spawnDebris(at position: CGPoint, volume: CGFloat, clump: Bool, inheritedVX: CGFloat, outward: CGFloat) -> Bool {
         let velocity = CGVector(
             dx: inheritedVX * 0.15 + outward * CGFloat.random(in: 5...15, using: &rng) + CGFloat.random(in: -8...8, using: &rng),
             dy: CGFloat.random(in: -6...6, using: &rng)
         )
+        if clump {
+            let natural = (volume / .pi).squareRoot() * 0.95
+            let radius = min(max(natural, config.clumpRadiusRange.lowerBound), config.clumpRadiusRange.upperBound)
+            return spawn(
+                kind: .clump, at: position, radius: radius, snowVolume: volume, velocity: velocity,
+                driftX: outward * 2 + CGFloat.random(in: -2...2, using: &rng),
+                swayAmplitude: CGFloat.random(in: 0.5...2.5, using: &rng),
+                opacity: 1
+            )
+        }
         return spawn(
-            at: position, radius: radius, snowVolume: volume, velocity: velocity,
+            kind: .powder, at: position, radius: CGFloat.random(in: config.powderRadiusRange, using: &rng),
+            snowVolume: volume, velocity: velocity,
             driftX: outward * 2 + CGFloat.random(in: -3...3, using: &rng),
-            swayAmplitude: outward == 0 ? CGFloat.random(in: 4...12, using: &rng) : CGFloat.random(in: 1...2, using: &rng),
-            opacity: CGFloat.random(in: 0.75...1.0, using: &rng),
-            isPowder: true
+            // Powder is light: it sways more and falls slower than regular flakes of its size.
+            swayAmplitude: outward == 0 ? CGFloat.random(in: 6...16, using: &rng) : CGFloat.random(in: 2...5, using: &rng),
+            opacity: CGFloat.random(in: 0.75...1.0, using: &rng)
         )
     }
 
-    /// Turns snow that slid past a window edge into powder falling outward.
+    /// A landing clump bursts into a little cloud of dust. The dust carries no volume; the clump already deposited it.
+    private mutating func burst(at point: CGPoint, radius: CGFloat) {
+        let count = 2 + Int(radius)
+        for _ in 0..<count {
+            let position = CGPoint(x: point.x + CGFloat.random(in: -radius...radius, using: &rng), y: point.y - 1)
+            let velocity = CGVector(dx: CGFloat.random(in: -35...35, using: &rng), dy: CGFloat.random(in: -45 ... -12, using: &rng))
+            guard spawn(
+                kind: .puff, at: position, radius: CGFloat.random(in: 0.7...1.5, using: &rng), snowVolume: 0,
+                velocity: velocity, driftX: 0, swayAmplitude: 0, opacity: CGFloat.random(in: 0.6...0.95, using: &rng),
+                life: CGFloat.random(in: 0.25...0.6, using: &rng)
+            ) else { return }
+        }
+    }
+
+    /// Turns snow that slid past a window edge into powder (and the odd clump) falling outward.
     /// `side` is -1 for the left edge, 1 for the right edge.
     private mutating func releaseSpill(of index: Int, side: CGFloat) {
         var credit = side < 0 ? surfaces[index].spillCredit.left : surfaces[index].spillCredit.right
@@ -363,9 +431,11 @@ public struct SnowSimulation {
             let surface = surfaces[index]
             let column = side < 0 ? 0 : surface.heights.count - 1
             let x = side < 0 ? surface.minX - config.powderRadiusRange.upperBound - 2 : surface.maxX + config.powderRadiusRange.upperBound + 2
-            guard spawnPowder(at: CGPoint(x: x, y: surface.topY(atColumn: column)), volume: config.powderVolume,
+            let clump = credit >= config.clumpVolumeRange.lowerBound && CGFloat.random(in: 0..<1, using: &rng) < 0.3
+            let volume = clump ? config.clumpVolumeRange.lowerBound : config.powderVolume
+            guard spawnDebris(at: CGPoint(x: x, y: surface.topY(atColumn: column)), volume: volume, clump: clump,
                               inheritedVX: 0, outward: side) else { break }
-            credit -= config.powderVolume
+            credit -= volume
         }
         // When the pool is full, don't let unreleased snow pile up without bound.
         credit = min(credit, 10 * config.powderVolume)
@@ -383,37 +453,54 @@ public struct SnowSimulation {
         )
         let drift = CGFloat.random(in: -4...4, using: &rng)
         spawn(
-            at: position, radius: radius, snowVolume: Self.flakeVolume(radius: radius, config: config),
+            kind: .snow, at: position, radius: radius, snowVolume: Self.flakeVolume(radius: radius, config: config),
             velocity: nil, driftX: drift,
             swayAmplitude: CGFloat.random(in: 6...18, using: &rng),
-            opacity: CGFloat.random(in: 0.65...1.0, using: &rng),
-            isPowder: false
+            opacity: CGFloat.random(in: 0.65...1.0, using: &rng)
         )
     }
 
-    /// `velocity == nil` starts the flake at its drift and fall speed.
+    /// `velocity == nil` starts the particle at its drift and fall speed.
     @discardableResult
-    private mutating func spawn(
-        at position: CGPoint, radius: CGFloat, snowVolume: CGFloat, velocity: CGVector?,
-        driftX: CGFloat, swayAmplitude: CGFloat, opacity: CGFloat, isPowder: Bool
+    mutating func spawn(
+        kind: Flake.Kind, at position: CGPoint, radius: CGFloat, snowVolume: CGFloat, velocity: CGVector?,
+        driftX: CGFloat, swayAmplitude: CGFloat, opacity: CGFloat, life: CGFloat = 0, length: CGFloat = 0
     ) -> Bool {
+        guard kind == .snow || freeSlots.count > 0 else { return false }
         guard let slot = freeSlots.popLast() else { return false }
         var flake = Flake()
+        flake.kind = kind
         flake.radius = radius
         flake.position = position
-        // Larger flakes fall faster; a bit of jitter keeps them from moving in lockstep.
-        flake.fallSpeed = 28 + 16 * radius + CGFloat.random(in: -6...6, using: &rng)
+        switch kind {
+        case .clump:
+            // Heavy: starts slow and accelerates toward a high terminal speed, like a dropping lump.
+            flake.fallSpeed = 180 + 30 * radius + CGFloat.random(in: -80...120, using: &rng)
+            flake.spin = CGFloat.random(in: -2.5...2.5, using: &rng)
+        case .powder:
+            flake.fallSpeed = 30 + 14 * radius + CGFloat.random(in: -6...6, using: &rng)
+        case .ice:
+            flake.fallSpeed = 260 + CGFloat.random(in: -30...30, using: &rng)
+            flake.spin = CGFloat.random(in: -3...3, using: &rng)
+        case .snow, .puff:
+            // Larger flakes fall faster; a bit of jitter keeps them from moving in lockstep.
+            flake.fallSpeed = 28 + 16 * radius + CGFloat.random(in: -6...6, using: &rng)
+        }
+        if kind == .puff { flake.fallSpeed = 25 }
         flake.driftX = driftX
         flake.velocity = velocity ?? CGVector(dx: driftX, dy: flake.fallSpeed)
         flake.swayPhase = CGFloat.random(in: 0...(2 * .pi), using: &rng)
         flake.swayAmplitude = swayAmplitude
         flake.opacity = opacity
         flake.snowVolume = snowVolume
-        flake.isPowder = isPowder
+        flake.rotation = CGFloat.random(in: 0...(2 * .pi), using: &rng)
+        flake.seed = CGFloat.random(in: 0..<1, using: &rng)
+        flake.life = life
+        flake.length = length
         flake.isActive = true
         flakes[slot] = flake
         activeCount += 1
-        if !isPowder { snowfallCount += 1 }
+        if !flake.isPowder { snowfallCount += 1 }
         return true
     }
 
