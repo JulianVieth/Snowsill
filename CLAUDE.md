@@ -41,7 +41,8 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 
 ### Overlay-Fenster
 - Ein randloses `NSWindow` pro `NSScreen`, `frame = screen.frame`
-- `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = false`, `ignoresMouseEvents = true`
+- `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = false`, standardmäßig `ignoresMouseEvents = true`
+- Interaktion (Schneekugeln, siehe unten): Die Mausposition wird gepollt. Nur wenn der Cursor über greifbarem Schnee am Boden, einer Kugel oder einem Schneemann steht, wird `ignoresMouseEvents = false` gesetzt und der Cursor zur offenen Hand. Sonst gehen alle Klicks durch. Klicks auf Fenster dürfen nie abgefangen werden.
 - `level = .floating` (3): über normalen Fenstern, unter Menüleiste (24), Menüs, Alerts (8), Spotlight und Mitteilungen. Nicht `.statusBar` (25), das liegt über Menüleiste und Alerts. Das Dock (20) liegt über dem Schnee.
 - `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`
 - `MTKView` mit `layer.isOpaque = false`, `clearColor` mit Alpha 0, Blending mit vormultipliziertem Alpha. Shader werden zur Laufzeit mit `makeLibrary(source:)` kompiliert, weil die Command Line Tools keinen Offline-Metal-Compiler haben.
@@ -69,8 +70,27 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Schmelzen: langsamer, konstanter Abbau. Etwas schneller, wenn lange kein neuer Schnee kommt.
 - Wird ein Fenster bewegt, wandert sein Schnee als zusammenhängende Masse mit (`Surface.relocate`, spaltengenau, ohne Verlust). Beim Skalieren bleibt er an seiner absoluten Position.
 - Herunter fällt Schnee nur, wo er über eine Kante gerät: bei schnellem seitlichen Ziehen (Trägheit ab ca. 900 pt/s, er rutscht zur hinteren Kante), beim Verkleinern, an der Bildschirmkante und beim Schließen (dann die ganze Schicht)
-- Herabfallender Schnee ist **Pulver**, keine Flocken: kleine Partikel (1–2 pt, sonst unsichtbar), langsamer, stärkeres Pendeln. Jedes Partikel trägt sein Schneevolumen und gibt es beim Landen wieder ab, die Menge bleibt erhalten.
+- Herabfallender Schnee sind **Klumpen plus etwas Pulver** (wie im snowcat-Referenzvideo): grobe, unregelmäßige Brocken, die beim Aufprall zu Pulver zerstäuben, dazu feines Pulver (1–2 pt), langsamer, stärkeres Pendeln. Jedes Partikel trägt sein Schneevolumen und gibt es beim Landen wieder ab, die Menge bleibt erhalten.
 - Gerendert wird pro Oberfläche ein Triangle-Strip in Metal (weiß, leicht bläulicher Schatten). Die Vertices nur neu bauen, wenn sich die Heightmap geändert hat, höchstens mit 20 Hz.
+- Look (Referenzvideos `*.mp4` im Repo-Root): Fensterkappen dick, bucklig und wolkig mit weichem Schatten statt einer flachen Schicht. Die Bodenschicht hat eine ausgefranste, unregelmäßige Oberkante. Die Unregelmäßigkeit ist rein visuell (deterministisches Rauschen über x), die Heightmap bleibt die Wahrheit.
+- Eiszapfen an den Fensterunterkanten: wachsen langsam, wenn auf dem Fenster länger Schnee liegt, und brechen ab bzw. verschwinden, wenn das Fenster schnell bewegt oder geschlossen wird.
+
+### Schneekugeln und Schneemänner
+- Über Bodenschnee mit genug Höhe wird der Cursor zur Hand. Ziehen rollt eine Kugel: Sie wächst mit der zurückgelegten Strecke und nimmt das Volumen aus den überrollten Heightmap-Spalten auf (Volumen bleibt erhalten, ohne Schnee wächst sie nicht).
+- Loslassen: Die Kugel fällt auf die Oberfläche darunter (Boden oder Fensteroberkante) und bleibt liegen. Kugeln lassen sich erneut greifen und verschieben.
+- Wird eine kleinere Kugel auf eine größere gesetzt, wird sie gestapelt. Bei drei Kugeln ist der Schneemann fertig und bekommt Kohleaugen, Karottennase, Knopfreihe, Zweigarme und Hut.
+- Auf Fenstern wandern Kugeln und Schneemänner mit dem Fenster mit. Wird das Fenster geschlossen oder verschwindet die Fläche unter ihnen, fallen sie herunter und zerplatzen zu Klumpen und Pulver.
+- Logik (Kugelwachstum, Stapeln, Auflageflächen) in `SnowPileCore`, getestet. Gezeichnet prozedural im Shader (Kreise mit Schattierung), keine Bilddateien.
+
+### Schneeschaufler
+- Ein kleines Räumfahrzeug fährt regelmäßig am Bildschirmboden von einer Seite zur anderen, damit die Bodenschicht nicht zu einem gleichmäßigen Block wird. Es kommt, wenn die mittlere Bodenhöhe einen Schwellwert überschreitet, frühestens alle paar Minuten.
+- Vor der Schaufel sammelt sich Schnee als Wall (aus den Spalten entnommen, Volumen bleibt erhalten), dahinter bleibt eine dünne, unregelmäßige Restschicht. Am Bildschirmrand wird der Wall hinausgeschoben bzw. als Klumpen weggeschleudert.
+- Schneemänner am Boden umfährt bzw. überspringt es nicht: Es hält davor an oder fährt nur bis dorthin (keine Zerstörung von Gebautem).
+- Das Dock liegt über dem Overlay, der Schaufler ist also hinter dem Dock teilweise verdeckt. Das ist in Ordnung.
+
+### Schnee auf Schreibtisch-Icons und Widgets
+- Gewünscht: Schnee bleibt auch auf Schreibtisch-Icons und Widgets liegen.
+- Offen, vor der Umsetzung klären: Die Desktop-Icons sind ein einziges Finder-Fenster ohne Einzelpositionen. Einzelne Icon-Rechtecke gibt es nur über die Accessibility-API (Berechtigung nötig, nur nach Rückfrage). Widgets erst mit `CGWindowList` untersuchen (eigene Fenster mit eigenem Layer?).
 
 ### Fallende Flocken
 - Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500), dazu 2200 Plätze für Pulver, damit auch ein volles Fenster komplett zerstäuben kann, ohne den Schneefall zu unterbrechen
@@ -96,11 +116,16 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 1. Transparentes Overlay auf dem Hauptbildschirm, Flocken fallen durch und verschwinden unten
 2. Schneeverwehung am Bildschirmboden (Heightmap und Rendering)
 3. Schnee bleibt auf dem **aktiven Fenster** liegen und fällt ab, wenn es bewegt wird
-4. Alle sichtbaren Fenster inklusive Verdeckung
-5. Mehrere Bildschirme
-6. Menüleisten-Einstellungen und Persistenz
-7. Wind, Böen und Schmelzen
-8. `bundle.sh`, App-Icon und Launch at Login
+4. Look wie in den Referenzvideos: bucklige Fensterkappe, ausgefranster Bodenrand, Klumpen statt nur Pulver beim Herunterfallen
+5. Alle sichtbaren Fenster inklusive Verdeckung
+6. Schneeschaufler am Boden
+7. Schneekugeln rollen und Schneemänner bauen (inkl. Klick-Durchlass-Logik)
+8. Eiszapfen an Fensterunterkanten
+9. Mehrere Bildschirme
+10. Schnee auf Schreibtisch-Icons und Widgets (erst Machbarkeit prüfen)
+11. Menüleisten-Einstellungen und Persistenz (inkl. Schaufler und Schneemänner an/aus)
+12. Wind, Böen und Schmelzen
+13. `bundle.sh`, App-Icon und Launch at Login
 
 Immer nur einen Meilenstein auf einmal umsetzen. Danach bauen, testen, committen und mich bitten, es visuell zu prüfen.
 
