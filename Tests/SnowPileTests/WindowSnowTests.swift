@@ -339,6 +339,46 @@ import Testing
         #expect(try #require(windowSurface(sim)).totalVolume == 0)
     }
 
+    /// Recorded on macOS 26: a window on the right screen minimized into the Dock on the main screen (Genie).
+    static let genie: [(Double, CGRect)] = [
+        (0.025, CGRect(x: 5500, y: 355, width: 800, height: 352)), (0.114, CGRect(x: 5487, y: 355, width: 813, height: 352)),
+        (0.143, CGRect(x: 5385, y: 355, width: 915, height: 352)), (0.202, CGRect(x: 5066, y: 355, width: 1234, height: 352)),
+        (0.262, CGRect(x: 4460, y: 355, width: 1840, height: 352)), (0.303, CGRect(x: 4137, y: 355, width: 2163, height: 353)),
+        (0.314, CGRect(x: 3929, y: 363, width: 2370, height: 353)), (0.339, CGRect(x: 3635, y: 384, width: 2649, height: 353)),
+        (0.370, CGRect(x: 2825, y: 455, width: 3250, height: 353)), (0.455, CGRect(x: 1513, y: 750, width: 1841, height: 323)),
+        (0.526, CGRect(x: 1506, y: 966, width: 191, height: 107)), (0.595, CGRect(x: 1504, y: 1039, width: 64, height: 34)),
+    ]
+
+    @Test func recordedGenieMinimizeDropsTheSnowWhereItLay() throws {
+        let screen = CGRect(x: 5150, y: -84, width: 1920, height: 1080)
+        var sim = SnowSimulation(config: config(), bounds: screen, seed: 7)
+        let start = WindowInfo(number: 9, ownerPID: 1, bounds: Self.genie[0].1)
+        sim.setWindows([start], timestamp: 0)
+        sim.fillWindow(9, height: 10)
+        let volume = try #require(windowSurface(sim, 9)).totalVolume
+        for (t, frame) in Self.genie.dropFirst() {
+            sim.setWindows([WindowInfo(number: 9, ownerPID: 1, bounds: frame)], timestamp: t)
+            if let surface = windowSurface(sim, 9) {
+                // While stretching sideways the snow stays where it was, at the old top edge.
+                #expect(surface.baseY == 355)
+            }
+        }
+        #expect(windowSurface(sim, 9) == nil)
+        // All of it fell from the old top edge (minus what slid off the stretched cap early on, also from there).
+        let debris = sim.flakes.filter(\.isActive)
+        #expect(abs(airborneVolume(sim) - volume) < 1e-6)
+        #expect(debris.allSatisfy { $0.position.y <= 356 && $0.position.y >= 330 })
+    }
+
+    @Test func movingDownOrResizingFromTheTopIsNoMinimize() {
+        let a = CGRect(x: 100, y: 200, width: 400, height: 300)
+        #expect(!SnowSimulation.looksLikeMinimize(from: a, to: a.offsetBy(dx: 30, dy: 80)))          // move
+        #expect(!SnowSimulation.looksLikeMinimize(from: a, to: CGRect(x: 100, y: 260, width: 400, height: 240))) // top edge
+        #expect(!SnowSimulation.looksLikeMinimize(from: a, to: CGRect(x: 160, y: 260, width: 340, height: 240))) // top-left corner
+        #expect(!SnowSimulation.looksLikeMinimize(from: a, to: CGRect(x: 40, y: 200, width: 460, height: 300)))  // left edge
+        #expect(SnowSimulation.looksLikeMinimize(from: a, to: CGRect(x: 80, y: 230, width: 500, height: 300)))   // genie step
+    }
+
     @Test func resizingFromACornerIsNoMinimize() throws {
         var sim = simWithSnow(3000)
         sim.setWindows([window], timestamp: 0.5)

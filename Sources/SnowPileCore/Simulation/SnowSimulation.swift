@@ -432,13 +432,15 @@ public struct SnowSimulation {
         )
     }
 
-    /// The minimize animation shrinks the window toward the Dock within a poll or two: it gets smaller, its top
-    /// sinks, and both side edges move. Resizing by hand always keeps one side edge in place.
+    /// The minimize animation (Genie or Scale) moves the window down toward the Dock while its size changes:
+    /// top and bottom edge sink together and the size changes in the same step. By hand that never happens:
+    /// moving keeps the size, resizing keeps at least one of top and bottom in place. (Genie first stretches the
+    /// window sideways with top and bottom fixed; that looks like a resize and the snow rightly stays put.)
     static func looksLikeMinimize(from a: CGRect, to b: CGRect) -> Bool {
-        let shrank = b.width < a.width - 8 && b.height < a.height - 8
-        let topSank = b.minY > a.minY + 8
-        let bothSidesMoved = abs(b.minX - a.minX) > 2 && abs(b.maxX - a.maxX) > 2
-        return shrank && topSank && bothSidesMoved
+        let sizeChanged = abs(b.width - a.width) > 2 || abs(b.height - a.height) > 2
+        let topSank = b.minY > a.minY + 2
+        let bottomMoved = abs(b.maxY - a.maxY) > 2
+        return sizeChanged && topSank && bottomMoved
     }
 
     /// Velocity of a window's top-left corner and when it was measured, so the renderer can predict where the
