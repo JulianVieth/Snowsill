@@ -29,15 +29,18 @@ Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simuliert
 
 ```
 Sources/SnowPile/              (executableTarget, AppKit/Metal/SwiftUI)
-  App/          SnowPileApp.swift (MenuBarExtra, Activation Policy .accessory), SnowSettings.swift
-  Overlay/      OverlayWindow.swift (ein Fenster pro Bildschirm), OverlayController.swift
+  App/          SnowPileApp.swift (MenuBarExtra, Activation Policy .accessory), SnowSettings.swift (UserDefaults)
+  Overlay/      OverlayWindow.swift (nicht aktivierendes Panel + View mit Maus), OverlayController.swift (ein Overlay pro Bildschirm, Pause, Maus)
   Windows/      WindowTracker.swift (CGWindowList-Polling)
-  Rendering/    SnowRenderer.swift (MTKViewDelegate, Frame-Loop), Shaders.swift (MSL-Quelltext)
+  Rendering/    SnowRenderer.swift (MTKViewDelegate, Frame-Loop), Shaders.swift (MSL-Quelltext, Sprite-Formen)
+  Snapshot/     SnapshotRunner.swift, SnapshotScenario.swift
 Sources/SnowPileCore/          (Library, nur Foundation/CoreGraphics – testbar)
-  Simulation/   Flake.swift, Surface.swift (Heightmap), SnowSimulation.swift, Wind.swift, Occlusion.swift
-  Rendering/    FlakeInstances.swift, SurfaceMesh.swift (GPU-Daten packen, ohne Metal-Import)
-  Windows/      WindowFilter.swift (Fensterliste filtern, aktives Fenster; reine Logik)
-  Util/         Coordinates.swift
+  Simulation/   Flake.swift, Surface.swift (Heightmap), SnowSimulation.swift, Wind.swift, Occlusion.swift,
+                Plow.swift, Snowballs.swift, Icicles.swift
+  Rendering/    Sprites.swift (Instanzdaten, Flocken packen), SceneSprites.swift (Schaufler, Kugeln, Eiszapfen),
+                SurfaceMesh.swift (GPU-Daten packen, ohne Metal-Import)
+  Windows/      WindowFilter.swift (Fensterliste, Widgets, Klick-Blocker, aktives Fenster; reine Logik)
+  Util/         Coordinates.swift, Noise.swift
 Tests/SnowPileTests/           (swift-testing, testet SnowPileCore)
 ```
 
@@ -104,7 +107,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Bewegung: Fallgeschwindigkeit abhängig von der Größe, sinusförmiges Pendeln, dazu der globale Wind
 - Wind: ruhige Grundbrise plus zufällige Böen (geglättetes Rauschen). Gelegentlich kurze „Flurries“ mit vielen Flocken.
 - Kollision: pro Frame prüfen, ob die Flocke eine Oberkante innerhalb ihres x-Bereichs von oben gekreuzt hat. Bei ein paar Dutzend Oberflächen reicht das naiv aus.
-- Rendering: alle aktiven Flocken werden pro Frame in einen vorallokierten `MTLBuffer` gepackt (`FlakeInstances.pack`, getestet) und mit einem einzigen instanzierten Draw-Call gezeichnet. Die Scheibe entsteht prozedural im Fragment-Shader. Nicht SpriteKit: 800 `SKSpriteNode`s kosteten allein durch die Property-Setter ca. 10 % CPU.
+- Rendering: alle aktiven Partikel und Szenenobjekte werden pro Frame in einen vorallokierten `MTLBuffer` gepackt (`FlakeSprites.pack`, `SceneSprites.write`, getestet) und mit einem einzigen instanzierten Draw-Call gezeichnet. Die Scheibe entsteht prozedural im Fragment-Shader. Nicht SpriteKit: 800 `SKSpriteNode`s kosteten allein durch die Property-Setter ca. 10 % CPU.
 
 ### Menüleiste und Einstellungen
 - `MenuBarExtra` mit Schneeflocken-SF-Symbol. Optionen: An/Aus, Intensität (leicht / mittel / Schneesturm), Flockengröße, Wind, Modus „nur aktives Fenster“ oder „alle Fenster“, Schnee am Boden an/aus, „Schnee abschütteln“ (Reset), Launch at Login, Beenden

@@ -35,17 +35,18 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var frameIndex = 0
     private var lastFrameTime: CFTimeInterval?
 
-    // Surface mesh is built on the CPU at most at 20 Hz and copied into a frame's buffer only when that buffer is stale.
-    private var mesh = ContiguousArray<SurfaceVertex>()
+    // The surface mesh is rebuilt at most at 20 Hz (every frame while a window moves), straight into the next buffer
+    // of a ring. The ring has one buffer more than frames in flight, so the GPU never reads a buffer being written.
+    private static let meshBufferCount = maxFramesInFlight + 1
+    private var meshBuffers: [MTLBuffer?] = Array(repeating: nil, count: meshBufferCount)
+    private var meshBufferIndex = 0
+    private var currentMeshBuffer: MTLBuffer?
     private var meshRanges: [SurfaceRange] = []
-    private var meshGeneration = 0
     /// (surface id, geometry version, version) the current mesh was built from.
     private var meshSources: [SIMD3<Int>] = []
     private var lastMeshBuild: CFTimeInterval = -.infinity
     /// Whether the last mesh was built with a predicted offset; then the next frame must rebuild as well.
     private var meshWasPredicted = false
-    private var surfaceBuffers: [MTLBuffer] = []
-    private var surfaceBufferGenerations: [Int]
 
     private var debugLabel: NSTextField?
     private var debugFrames = 0
@@ -78,7 +79,6 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             config: config, bounds: screenFrameCG, screenIndex: screenIndex, seed: seed ?? UInt64.random(in: .min ... .max)
         )
         commandQueue = queue
-        surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
 
         do {
             let library = try device.makeLibrary(source: Shaders.source, options: nil)
@@ -174,7 +174,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         var viewSize = viewSize
         let viewSizeLength = MemoryLayout<SIMD2<Float>>.stride
 
-        if let surfaceBuffer = surfaceBuffer(for: index) {
+        if let surfaceBuffer = currentMeshBuffer, !meshRanges.isEmpty {
             encoder.setRenderPipelineState(surfacePipeline)
             encoder.setVertexBuffer(surfaceBuffer, offset: 0, index: 0)
             encoder.setVertexBytes(&viewSize, length: viewSizeLength, index: 1)
@@ -220,14 +220,24 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
         let debugVertices = debug ? 2 : 0
         let needed = surfaces.reduce(0) { $0 + SurfaceMesh.vertexCount(for: $1) + debugVertices }
-        if mesh.count < needed {
-            mesh = ContiguousArray(repeating: SurfaceVertex(), count: needed)
+        meshBufferIndex = (meshBufferIndex + 1) % Self.meshBufferCount
+        let length = max(needed, 1) * MemoryLayout<SurfaceVertex>.stride
+        if (meshBuffers[meshBufferIndex]?.length ?? 0) < length {
+            // Only when the set of surfaces grows, never in steady state. Some headroom avoids regrowing often.
+            meshBuffers[meshBufferIndex] = device.makeBuffer(length: length * 5 / 4, options: .storageModeShared)
         }
+        guard let target = meshBuffers[meshBufferIndex] else {
+            meshRanges.removeAll(keepingCapacity: true)
+            return
+        }
+        let capacity = target.length / MemoryLayout<SurfaceVertex>.stride
+        let pointer = target.contents().bindMemory(to: SurfaceVertex.self, capacity: capacity)
+        let out = UnsafeMutableBufferPointer(start: pointer, count: capacity)
 
         meshRanges.removeAll(keepingCapacity: true)
         meshSources.removeAll(keepingCapacity: true)
         var offset = 0
-        mesh.withUnsafeMutableBufferPointer { out in
+        do {
             for surface in surfaces {
                 let count = SurfaceMesh.vertexCount(for: surface)
                 let predicted = predictedOffset(for: surface, now: now)
@@ -254,27 +264,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
                 meshSources.append(SIMD3(surface.id, surface.geometryVersion, surface.version))
             }
         }
-        meshGeneration &+= 1
-    }
-
-    /// Returns the frame's surface buffer, refreshed from the CPU mesh if it holds an older generation.
-    private func surfaceBuffer(for index: Int) -> MTLBuffer? {
-        guard !meshRanges.isEmpty else { return nil }
-        let length = mesh.count * MemoryLayout<SurfaceVertex>.stride
-        if surfaceBuffers.count != Self.maxFramesInFlight || surfaceBuffers[0].length < length {
-            // Only happens when the set of surfaces grows, never in steady state.
-            surfaceBuffers = (0..<Self.maxFramesInFlight).compactMap { _ in
-                device.makeBuffer(length: length, options: .storageModeShared)
-            }
-            guard surfaceBuffers.count == Self.maxFramesInFlight else { return nil }
-            surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
-        }
-        let buffer = surfaceBuffers[index]
-        if surfaceBufferGenerations[index] != meshGeneration {
-            mesh.withUnsafeBytes { buffer.contents().copyMemory(from: $0.baseAddress!, byteCount: length) }
-            surfaceBufferGenerations[index] = meshGeneration
-        }
-        return buffer
+        currentMeshBuffer = target
     }
 
     /// Window positions arrive with a delay and the frame shows even later. Moving window surfaces are drawn
