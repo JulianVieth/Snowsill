@@ -55,21 +55,24 @@ import Testing
         #expect(s.plow.pushedAside > 0)
     }
 
-    @Test func pushesOneWallRightInFrontOfTheBlade() throws {
-        var c = config()
-        c.plowThreshold = 5
-        var s = SnowSimulation(config: c, bounds: screen, seed: 1)
-        s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 1000 * 10, minX: 0, maxX: 1000) }
-        run(&s, seconds: 13)
-        let ground = s.surfaces[0]
-        let blade = try #require(ground.column(at: s.plow.x))
-        // A wall just ahead, higher than the untouched snow, but no flat-topped block.
-        let wall = ground.heights[blade..<min(blade + 15, ground.heights.count)]
-        #expect(wall.max()! > 14)
-        #expect(wall.max()! <= Plow.wallHeight + 0.01)
-        // Further ahead the snow is untouched.
-        let far = try #require(ground.column(at: s.plow.x + 150))
-        #expect(abs(ground.heights[far] - 10) < 0.5)
+    @Test func pushesAVisibleWallAheadEvenInDeepSnow() throws {
+        for depth in [CGFloat(10), 32] {
+            var c = config()
+            c.plowThreshold = 5
+            var s = SnowSimulation(config: c, bounds: screen, seed: 1)
+            s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 1000 * depth, minX: 0, maxX: 1000) }
+            run(&s, seconds: 13)
+            #expect(s.plow.phase == .plowing)
+            let ground = s.surfaces[0]
+            let blade = try #require(ground.column(at: s.plow.x))
+            // A wall rising clearly above the untouched snow right in front of the blade ...
+            let wall = ground.heights[blade..<min(blade + 15, ground.heights.count)]
+            #expect(wall.max()! > depth + Plow.wallRise * 0.6, "depth \(depth)")
+            #expect(wall.max()! <= depth + Plow.wallRise + 0.5)
+            // ... tapering into the untouched snow further ahead.
+            let far = try #require(ground.column(at: s.plow.x + 150))
+            #expect(abs(ground.heights[far] - depth) < 1)
+        }
     }
 
     @Test func nothingTrailsBehindTheBlade() throws {

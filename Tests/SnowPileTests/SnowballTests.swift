@@ -319,7 +319,9 @@ import Testing
         let after = try #require(s.stacks.first)
         #expect(abs(after.bottomY - stack.bottomY) < 4)
         #expect(!s.plow.isActive)
-        // The wall is left as a pile no higher than a wall, no 50 pt block.
-        #expect(s.surfaces[0].heights.max()! <= Plow.wallHeight + 0.01)
+        // The wall is left as a short pile in front of the ball, no long block.
+        let heights = s.surfaces[0].heights
+        #expect(heights.max()! <= 20 + Plow.wallRise + 0.5)
+        #expect(heights.filter { $0 > 20 + 3 }.count < Int(Plow.wallLength / Surface.columnWidth) + 5)
     }
 }
