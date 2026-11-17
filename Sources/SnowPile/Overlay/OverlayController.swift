@@ -59,10 +59,18 @@ final class OverlayController {
         tearDown()
     }
 
-    /// Milestone 3: only the active window carries snow.
+    /// Either all visible windows carry snow, or only the frontmost window of the active app.
+    var onlyActiveWindow = false {
+        didSet { if oldValue != onlyActiveWindow { applyWindows() } }
+    }
+
     private func applyWindows() {
-        let active = WindowFilter.activeWindow(in: windowList, activePID: activePID)
-        let windows = active.map { [$0] } ?? []
+        let windows: [WindowInfo]
+        if onlyActiveWindow {
+            windows = WindowFilter.activeWindow(in: windowList, activePID: activePID).map { [$0] } ?? []
+        } else {
+            windows = windowList
+        }
         for renderer in renderers { renderer.setWindows(windows, timestamp: windowListTimestamp) }
     }
 

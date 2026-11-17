@@ -243,6 +243,20 @@ public struct SnowSimulation {
         for surface in existing.values { powderize(surface) }
         surfaces = updated
         tracked = newTracked
+        updateOcclusion(windows)
+    }
+
+    /// Hides the columns of each window edge that a window further in front covers.
+    private mutating func updateOcclusion(_ windows: [WindowInfo]) {
+        var order: [Int: Int] = [:]
+        for (i, window) in windows.enumerated() { order[window.number] = i }
+        for s in surfaces.indices {
+            guard case .window(let number) = surfaces[s].kind, let index = order[number] else { continue }
+            let occluders = windows[..<index].map(\.bounds)
+            let surface = surfaces[s]
+            let visible = Occlusion.visibleSegments(minX: surface.minX, maxX: surface.maxX, y: surface.baseY, occluders: occluders)
+            surfaces[s].setVisible(visible)
+        }
     }
 
     /// Velocity of a window's top-left corner and when it was measured, so the renderer can predict where the
@@ -345,7 +359,8 @@ public struct SnowSimulation {
         var credit: CGFloat = 0
         var lastColumn = 0
         var next = nextDebris(remaining: .infinity, scale: scale)
-        for column in surface.heights.indices where surface.heights[column] > 0 {
+        // Snow behind a window in front falls down behind it, out of sight.
+        for column in surface.heights.indices where surface.heights[column] > 0 && !surface.isHidden(column) {
             lastColumn = column
             credit += surface.heights[column] * Surface.columnWidth
             while credit >= next.volume {
@@ -427,6 +442,8 @@ public struct SnowSimulation {
     /// `side` is -1 for the left edge, 1 for the right edge.
     private mutating func releaseSpill(of index: Int, side: CGFloat) {
         var credit = side < 0 ? surfaces[index].spillCredit.left : surfaces[index].spillCredit.right
+        // An end hidden behind a window in front spills out of sight.
+        if surfaces[index].isHidden(side < 0 ? 0 : surfaces[index].heights.count - 1) { credit = 0 }
         while credit >= config.powderVolume {
             let surface = surfaces[index]
             let column = side < 0 ? 0 : surface.heights.count - 1
@@ -514,6 +531,10 @@ public struct SnowSimulation {
         snowfallCount = 0
         spawnAccumulator = 0
         for i in surfaces.indices { surfaces[i].clear() }
+    }
+
+    mutating func addTestFlake(at position: CGPoint, volume: CGFloat) {
+        spawn(kind: .snow, at: position, radius: 2, snowVolume: volume, velocity: nil, driftX: 0, swayAmplitude: 0, opacity: 1)
     }
 
     mutating func modifySurface(_ kind: Surface.Kind, _ body: (inout Surface) -> Void) {

@@ -15,7 +15,7 @@ struct SnapshotScenario {
 
     static func named(_ name: String) -> SnapshotScenario? { all.first { $0.name == name } }
 
-    static let all: [SnapshotScenario] = [drag, close, ground]
+    static let all: [SnapshotScenario] = [drag, close, ground, overlap]
 
     private static let pid: Int32 = 4242
 
@@ -55,6 +55,23 @@ struct SnapshotScenario {
             t < 40 ? [WindowInfo(number: 1, ownerPID: pid, bounds: CGRect(x: 420, y: 340, width: 600, height: 380))] : []
         },
         focus: { _, _ in CGRect(x: 360, y: 260, width: 720, height: 640) }
+    )
+
+    /// Two overlapping windows: snow must not lie on the part of the back window that the front one covers.
+    /// Then the front window moves away and reveals the hidden part.
+    static let overlap = SnapshotScenario(
+        name: "overlap",
+        summary: "Vorderes Fenster verdeckt hinteres, 40 s schneien, 40–41 s vorderes Fenster nach unten rechts",
+        duration: 44,
+        captures: [20, 40, 40.5, 41, 42, 44],
+        windows: { t in
+            let fx = lerp(560, 900, (t - 40) / 1), fy = lerp(260, 420, (t - 40) / 1)
+            return [
+                WindowInfo(number: 2, ownerPID: pid, bounds: CGRect(x: fx, y: fy, width: 420, height: 300)),
+                WindowInfo(number: 1, ownerPID: pid + 1, bounds: CGRect(x: 240, y: 320, width: 600, height: 380)),
+            ]
+        },
+        focus: { _, _ in CGRect(x: 180, y: 200, width: 900, height: 200) }
     )
 
     /// Only the ground, to judge how the drift builds up over time.
