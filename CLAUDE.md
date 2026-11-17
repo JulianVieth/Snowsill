@@ -17,7 +17,10 @@ swift build                 # nach JEDER Änderung ausführen, Fehler sofort beh
 swift test                  # Logik-Tests
 swift run SnowPile          # starten (Beenden über das Menüleisten-Icon)
 ./scripts/bundle.sh         # baut SnowPile.app (nötig für Launch at Login)
+SNOWPILE_SNAPSHOT=drag swift run SnowPile   # Snapshot-Modus, Szenarien: drag, close, ground
 ```
+
+Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simulierten Fenstern auf virtueller Uhr ab (fester Seed, schneller als Echtzeit), rendert offscreen und schreibt nach `snapshots/<szenario>/`: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt) und `stats.txt` (Flocken, Pulver, Höhen je Oberfläche). Neue Features bekommen ein eigenes Szenario.
 
 ## Architektur
 
@@ -131,7 +134,7 @@ Immer nur einen Meilenstein auf einmal umsetzen. Danach bauen, testen, committen
 
 ## Arbeitsregeln für Claude
 
-- Du siehst meinen Bildschirm nicht. Nach visuellen Änderungen sag mir konkret, worauf ich achten soll, und warte auf mein Feedback, statt zu raten.
+- Visuelle Änderungen zuerst selbst prüfen: Snapshot-Szenario laufen lassen und die Bilder ansehen; mit Bildschirmaufnahme-Berechtigung zusätzlich `screencapture -x` auf dem echten Bildschirm. Danach sag mir konkret, worauf ich noch achten soll (v. a. Ruckeln und Latenz, die Snapshots nicht zeigen), und warte auf mein Feedback.
 - Für Debugging einen versteckten Debug-Modus einbauen (Umgebungsvariable `SNOWPILE_DEBUG=1`): Oberflächen als rote Linien zeichnen, FPS und Flockenzahl anzeigen
 - Für Koordinatenumrechnung, Verdeckung, Heightmap und Sandpile-Regel immer Tests schreiben, bevor ein Bug dort „gefixt“ wird
 - Keine neuen Dependencies ohne Rückfrage

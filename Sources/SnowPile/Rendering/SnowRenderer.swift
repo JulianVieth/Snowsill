@@ -44,23 +44,37 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private var surfaceBuffers: [MTLBuffer] = []
     private var surfaceBufferGenerations: [Int]
 
-    private let debugLabel: NSTextField?
+    private var debugLabel: NSTextField?
     private var debugFrames = 0
     private var debugElapsed: CFTimeInterval = 0
 
-    init?(view: MTKView, screenFrameCG: CGRect, debug: Bool) {
-        guard let device = view.device, let queue = device.makeCommandQueue() else { return nil }
+    convenience init?(view: MTKView, screenFrameCG: CGRect, debug: Bool) {
+        guard let device = view.device else { return nil }
+        self.init(device: device, pixelFormat: view.colorPixelFormat, screenFrameCG: screenFrameCG, debug: debug)
+        if debug {
+            let label = NSTextField(labelWithString: "")
+            label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+            label.textColor = .systemRed
+            label.frame = NSRect(x: 12, y: 60, width: 760, height: 20)
+            view.addSubview(label)
+            debugLabel = label
+        }
+    }
+
+    /// Without a view, for offscreen rendering (snapshot mode). A fixed `seed` makes runs repeatable.
+    init?(device: MTLDevice, pixelFormat: MTLPixelFormat, screenFrameCG: CGRect, debug: Bool, seed: UInt64? = nil) {
+        guard let queue = device.makeCommandQueue() else { return nil }
         self.screenFrameCG = screenFrameCG
         self.debug = debug
         self.device = device
-        simulation = SnowSimulation(bounds: screenFrameCG)
+        simulation = SnowSimulation(bounds: screenFrameCG, seed: seed ?? UInt64.random(in: .min ... .max))
         commandQueue = queue
         surfaceBufferGenerations = Array(repeating: -1, count: Self.maxFramesInFlight)
 
         do {
             let library = try device.makeLibrary(source: Shaders.source, options: nil)
-            flakePipeline = try Self.makePipeline(device, library, view, vertex: "flakeVertex", fragment: "flakeFragment")
-            surfacePipeline = try Self.makePipeline(device, library, view, vertex: "surfaceVertex", fragment: "surfaceFragment")
+            flakePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "flakeVertex", fragment: "flakeFragment")
+            surfacePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "surfaceVertex", fragment: "surfaceFragment")
         } catch {
             NSLog("SnowPile: Metal pipeline failed: \(error)")
             return nil
@@ -73,28 +87,18 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             buffers.append(buffer)
         }
         instanceBuffers = buffers
-
-        if debug {
-            let label = NSTextField(labelWithString: "")
-            label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-            label.textColor = .systemRed
-            label.frame = NSRect(x: 12, y: 60, width: 760, height: 20)
-            view.addSubview(label)
-            debugLabel = label
-        } else {
-            debugLabel = nil
-        }
+        debugLabel = nil
         super.init()
     }
 
     private static func makePipeline(
-        _ device: MTLDevice, _ library: MTLLibrary, _ view: MTKView, vertex: String, fragment: String
+        _ device: MTLDevice, _ library: MTLLibrary, _ pixelFormat: MTLPixelFormat, vertex: String, fragment: String
     ) throws -> MTLRenderPipelineState {
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = library.makeFunction(name: vertex)
         descriptor.fragmentFunction = library.makeFunction(name: fragment)
         let attachment = descriptor.colorAttachments[0]!
-        attachment.pixelFormat = view.colorPixelFormat
+        attachment.pixelFormat = pixelFormat
         // Premultiplied alpha, matching the transparent window.
         attachment.isBlendingEnabled = true
         attachment.sourceRGBBlendFactor = .one
@@ -111,12 +115,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     }
 
     private func render(in view: MTKView) {
-        let now = CACurrentMediaTime()
-        let dt = lastFrameTime.map { now - $0 } ?? 0
-        lastFrameTime = now
-        simulation.step(dt: dt)
-        rebuildMeshIfNeeded(now: now)
-        updateDebugLabel(dt: dt)
+        advance(to: CACurrentMediaTime())
 
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -127,9 +126,43 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             inFlight.signal()
             return
         }
+        encode(encoder, viewSize: SIMD2(Float(view.bounds.width), Float(view.bounds.height)))
+        encoder.endEncoding()
+
+        let semaphore = inFlight
+        commandBuffer.addCompletedHandler { _ in semaphore.signal() }
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+
+    /// Steps the simulation to `now` (seconds on any monotonic clock) and refreshes the surface mesh.
+    func advance(to now: CFTimeInterval) {
+        let dt = lastFrameTime.map { now - $0 } ?? 0
+        lastFrameTime = now
+        simulation.step(dt: dt)
+        rebuildMeshIfNeeded(now: now)
+        updateDebugLabel(dt: dt)
+    }
+
+    /// Renders the current state into `texture` and waits for the GPU. Only for snapshot mode.
+    func renderOffscreen(into texture: MTLTexture, viewSize: CGSize) {
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        encode(encoder, viewSize: SIMD2(Float(viewSize.width), Float(viewSize.height)))
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    private func encode(_ encoder: MTLRenderCommandEncoder, viewSize: SIMD2<Float>) {
         let index = frameIndex
         frameIndex = (frameIndex + 1) % Self.maxFramesInFlight
-        var viewSize = SIMD2<Float>(Float(view.bounds.width), Float(view.bounds.height))
+        var viewSize = viewSize
         let viewSizeLength = MemoryLayout<SIMD2<Float>>.stride
 
         if let surfaceBuffer = surfaceBuffer(for: index) {
@@ -159,12 +192,6 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             encoder.setVertexBytes(&viewSize, length: viewSizeLength, index: 1)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
         }
-        encoder.endEncoding()
-
-        let semaphore = inFlight
-        commandBuffer.addCompletedHandler { _ in semaphore.signal() }
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
     }
 
     private func rebuildMeshIfNeeded(now: CFTimeInterval) {
@@ -250,6 +277,23 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
     func setWindows(_ windows: [WindowInfo], timestamp: CFTimeInterval) {
         simulation.setWindows(windows, timestamp: timestamp)
+    }
+
+    /// One line of numbers for the snapshot log: flakes, powder, and snow height per surface.
+    func statsLine() -> String {
+        var parts = ["Flocken \(simulation.snowfallCount)", "Pulver \(simulation.activeCount - simulation.snowfallCount)"]
+        for surface in simulation.surfaces {
+            let heights = surface.heights
+            let maxHeight = heights.max() ?? 0
+            let mean = heights.isEmpty ? 0 : heights.reduce(0, +) / CGFloat(heights.count)
+            let name: String
+            switch surface.kind {
+            case .ground: name = "Boden"
+            case .window(let number): name = "Fenster \(number)"
+            }
+            parts.append(String(format: "%@ x %.0f–%.0f: max %.1f / Ø %.1f pt", name, surface.minX, surface.maxX, maxHeight, mean))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func updateDebugLabel(dt: CFTimeInterval) {

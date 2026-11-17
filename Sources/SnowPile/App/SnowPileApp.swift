@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlay = OverlayController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let env = ProcessInfo.processInfo.environment
+        if let scenario = env["SNOWPILE_SNAPSHOT"] {
+            let out = env["SNOWPILE_SNAPSHOT_OUT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            exit(SnapshotRunner.run(scenarioName: scenario, outputDirectory: out, debug: env["SNOWPILE_DEBUG"] == "1"))
+        }
         NSApp.setActivationPolicy(.accessory)
         overlay.start()
     }
