@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 @Suite struct OcclusionTests {
     @Test func nothingInFrontLeavesTheWholeEdge() {

@@ -35,7 +35,7 @@ final class OverlayView: MTKView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    // SnowPile is never the active app, so cursor rects don't apply; an always-active tracking area does.
+    // Snowsill is never the active app, so cursor rects don't apply; an always-active tracking area does.
     // The window only receives these while it takes mouse events, i.e. while the cursor is over snow.
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

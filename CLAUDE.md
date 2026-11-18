@@ -1,4 +1,4 @@
-# SnowPile – Schnee für den macOS-Desktop
+# Snowsill – Schnee für den macOS-Desktop
 
 Menüleisten-App für macOS, die Schnee über den Bildschirm fallen lässt. Der Schnee bleibt auf den Oberkanten der Fenster und am unteren Bildschirmrand liegen, rutscht ab, wenn ein Fenster bewegt wird, und schmilzt langsam weg. Privates Spaßprojekt: keine App-Store-Distribution, keine Sandbox.
 
@@ -15,34 +15,34 @@ Menüleisten-App für macOS, die Schnee über den Bildschirm fallen lässt. Der 
 ```sh
 swift build                 # nach JEDER Änderung ausführen, Fehler sofort beheben
 swift test                  # Logik-Tests
-swift run SnowPile          # starten (Beenden über das Menüleisten-Icon)
-./scripts/bundle.sh         # baut SnowPile.app (nötig für Launch at Login)
-SNOWPILE_SNAPSHOT=drag swift run SnowPile   # Snapshot-Modus, Szenarien siehe unten
-SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile   # Login-Objekt prüfen (status|on|off), nur im Bundle
-SNOWPILE_SELFTEST=mouse swift run SnowPile   # Mauspfad live prüfen (Hover/Klick-Durchlass, Schneemann bauen), ohne echte Maus-Events
+swift run Snowsill          # starten (Beenden über das Menüleisten-Icon)
+./scripts/bundle.sh         # baut Snowsill.app (nötig für Launch at Login)
+SNOWSILL_SNAPSHOT=drag swift run Snowsill   # Snapshot-Modus, Szenarien siehe unten
+SNOWSILL_LOGIN_ITEM=status Snowsill.app/Contents/MacOS/Snowsill   # Login-Objekt prüfen (status|on|off), nur im Bundle
+SNOWSILL_SELFTEST=mouse swift run Snowsill   # Mauspfad live prüfen (Hover/Klick-Durchlass, Schneemann bauen), ohne echte Maus-Events
 ```
 
 Szenarien: drag, close, ground, overlap, plow, snowman (Maus per Skript), icicles, secondary (Zweitbildschirm), widgets, wind, icons, carry (Schneemann auf ein Fenster tragen).
 
-Snapshot-Modus (`Sources/SnowPile/Snapshot/`): spielt ein Szenario mit simulierten Fenstern auf virtueller Uhr ab (fester Seed, schneller als Echtzeit), rendert offscreen und schreibt nach `snapshots/<szenario>/`: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt) und `stats.txt` (Flocken, Pulver, Höhen je Oberfläche). Neue Features bekommen ein eigenes Szenario.
+Snapshot-Modus (`Sources/Snowsill/Snapshot/`): spielt ein Szenario mit simulierten Fenstern auf virtueller Uhr ab (fester Seed, schneller als Echtzeit), rendert offscreen und schreibt nach `snapshots/<szenario>/`: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt) und `stats.txt` (Flocken, Pulver, Höhen je Oberfläche). Neue Features bekommen ein eigenes Szenario.
 
 ## Architektur
 
 ```
-Sources/SnowPile/              (executableTarget, AppKit/Metal/SwiftUI)
-  App/          SnowPileApp.swift (MenuBarExtra, Activation Policy .accessory), SnowSettings.swift (UserDefaults)
+Sources/Snowsill/              (executableTarget, AppKit/Metal/SwiftUI)
+  App/          SnowsillApp.swift (MenuBarExtra, Activation Policy .accessory), SnowSettings.swift (UserDefaults)
   Overlay/      OverlayWindow.swift (nicht aktivierendes Panel + View mit Maus), OverlayController.swift (ein Overlay pro Bildschirm, Pause, Maus)
   Windows/      WindowTracker.swift (CGWindowList-Polling)
   Rendering/    SnowRenderer.swift (MTKViewDelegate, Frame-Loop), Shaders.swift (MSL-Quelltext, Sprite-Formen)
   Snapshot/     SnapshotRunner.swift, SnapshotScenario.swift
-Sources/SnowPileCore/          (Library, nur Foundation/CoreGraphics – testbar)
+Sources/SnowsillCore/          (Library, nur Foundation/CoreGraphics – testbar)
   Simulation/   Flake.swift, Surface.swift (Heightmap), SnowSimulation.swift, Wind.swift, Occlusion.swift,
                 Plow.swift, Snowballs.swift, Icicles.swift
   Rendering/    Sprites.swift (Instanzdaten, Flocken packen), SceneSprites.swift (Schaufler, Kugeln, Eiszapfen),
                 SurfaceMesh.swift (GPU-Daten packen, ohne Metal-Import)
   Windows/      WindowFilter.swift (Fensterliste, Widgets, Klick-Blocker, aktives Fenster; reine Logik)
   Util/         Coordinates.swift, Noise.swift
-Tests/SnowPileTests/           (swift-testing, testet SnowPileCore)
+Tests/SnowsillTests/           (swift-testing, testet SnowsillCore)
 ```
 
 Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt getrennt. Die Simulation bekommt Oberflächen und Bildschirme als Werte rein und gibt Flocken und Heightmaps raus. Dadurch ist sie testbar.
@@ -93,7 +93,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Loslassen: Die Kugel fällt auf die Oberfläche darunter (Boden oder Fensteroberkante) und bleibt liegen. Kugeln lassen sich erneut greifen und verschieben. Wer die unterste Kugel eines Stapels greift, trägt den ganzen Stapel bzw. Schneemann (er rollt dabei nicht und wächst nicht); wer eine obere greift, nimmt die oberste ab.
 - Wird eine kleinere Kugel auf eine größere gesetzt, wird sie gestapelt. Bei drei Kugeln ist der Schneemann fertig und bekommt Kohleaugen, Karottennase, Knopfreihe, Zweigarme und Hut.
 - Auf Fenstern wandern Kugeln und Schneemänner mit dem Fenster mit. Wird das Fenster geschlossen oder verschwindet die Fläche unter ihnen, fallen sie herunter und zerplatzen zu Klumpen und Pulver.
-- Logik (Kugelwachstum, Stapeln, Auflageflächen) in `SnowPileCore`, getestet. Gezeichnet prozedural im Shader (Kreise mit Schattierung), keine Bilddateien.
+- Logik (Kugelwachstum, Stapeln, Auflageflächen) in `SnowsillCore`, getestet. Gezeichnet prozedural im Shader (Kreise mit Schattierung), keine Bilddateien.
 
 ### Schneeschaufler
 - Ein kleines Räumfahrzeug fährt regelmäßig am Bildschirmboden von einer Seite zur anderen, damit die Bodenschicht nicht zu einem gleichmäßigen Block wird. Es kommt, wenn die mittlere Bodenhöhe einen Schwellwert überschreitet, frühestens alle paar Minuten.
@@ -104,7 +104,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 ### Schnee auf Schreibtisch-Icons und Widgets
 - Gewünscht: Schnee bleibt auch auf Schreibtisch-Icons und Widgets liegen.
 - Widgets (umgesetzt): Jedes Widget ist ein eigenes Fenster von `com.apple.notificationcenterui` auf Layer `kCGDesktopIconWindowLevel + 2`, auch mit `.excludeDesktopElements` in der Liste. Die Fenster sind rundum 8 pt größer als die sichtbare Kachel (`WindowFilter.widgetPadding`). Sie liegen hinter allen normalen Fenstern, tragen Schnee, aber keine Eiszapfen.
-- Desktop-Icons (umgesetzt, freigegeben am 2026-11-17): Die Icons sind ein einziges Finder-Fenster ohne Einzelpositionen, deshalb liest `DesktopIconReader` die Rahmen über die Accessibility-API (Finder → AXScrollArea → AXImage), alle 2 s im Hintergrund. Standardmäßig aus; beim Einschalten im Menü fragt macOS nach „Bedienungshilfen“. Ohne Freigabe liefert er nichts. Der AX-Rahmen ist größer als die Grafik (bei 96 pt: oben ca. 7 pt, seitlich je ca. 15 pt Luft), `DesktopIcons.artwork` rechnet das heraus. Live geprüft am 2026-11-17 („Macintosh HD“: Rahmen 1584/58/96×96). Icons liegen hinter Fenstern und Widgets, flache Kappe (`iconMaxHeight`), keine Eiszapfen, Klicks auf Icons gehen immer durch. Prüfen: `open -W --env SNOWPILE_ICONS=list --stdout /tmp/icons.txt SnowPile.app && cat /tmp/icons.txt` bzw. im Debug-Modus die roten Linien.
+- Desktop-Icons (umgesetzt, freigegeben am 2026-11-17): Die Icons sind ein einziges Finder-Fenster ohne Einzelpositionen, deshalb liest `DesktopIconReader` die Rahmen über die Accessibility-API (Finder → AXScrollArea → AXImage), alle 2 s im Hintergrund. Standardmäßig aus; beim Einschalten im Menü fragt macOS nach „Bedienungshilfen“. Ohne Freigabe liefert er nichts. Der AX-Rahmen ist größer als die Grafik (bei 96 pt: oben ca. 7 pt, seitlich je ca. 15 pt Luft), `DesktopIcons.artwork` rechnet das heraus. Live geprüft am 2026-11-17 („Macintosh HD“: Rahmen 1584/58/96×96). Icons liegen hinter Fenstern und Widgets, flache Kappe (`iconMaxHeight`), keine Eiszapfen, Klicks auf Icons gehen immer durch. Prüfen: `open -W --env SNOWSILL_ICONS=list --stdout /tmp/icons.txt Snowsill.app && cat /tmp/icons.txt` bzw. im Debug-Modus die roten Linien.
 
 ### Fallende Flocken
 - Struct mit `position`, `velocity`, `radius`, `swayPhase`, `opacity`. Pool mit fester Maximalgröße (Standard 800, maximal 2500), dazu 2200 Plätze für Pulver, damit auch ein volles Fenster komplett zerstäuben kann, ohne den Schneefall zu unterbrechen
@@ -146,7 +146,7 @@ Immer nur einen Meilenstein auf einmal umsetzen. Danach bauen, testen, committen
 ## Arbeitsregeln für Claude
 
 - Visuelle Änderungen zuerst selbst prüfen: Snapshot-Szenario laufen lassen und die Bilder ansehen; mit Bildschirmaufnahme-Berechtigung zusätzlich `screencapture -x` auf dem echten Bildschirm. Danach sag mir konkret, worauf ich noch achten soll (v. a. Ruckeln und Latenz, die Snapshots nicht zeigen), und warte auf mein Feedback.
-- Für Debugging einen versteckten Debug-Modus einbauen (Umgebungsvariable `SNOWPILE_DEBUG=1`): Oberflächen als rote Linien zeichnen, FPS und Flockenzahl anzeigen
+- Für Debugging einen versteckten Debug-Modus einbauen (Umgebungsvariable `SNOWSILL_DEBUG=1`): Oberflächen als rote Linien zeichnen, FPS und Flockenzahl anzeigen
 - Für Koordinatenumrechnung, Verdeckung, Heightmap und Sandpile-Regel immer Tests schreiben, bevor ein Bug dort „gefixt“ wird
 - Keine neuen Dependencies ohne Rückfrage
 - Kleine Commits mit aussagekräftigen Messages auf Deutsch

@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 /// Each screen runs its own simulation in global CG coordinates. These use the layout of a real setup:
 /// a laptop as main screen and a wide monitor to its right that sits higher (negative CG y).

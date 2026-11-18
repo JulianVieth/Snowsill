@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 @Suite struct SnowSimulationTests {
     let screen = CGRect(x: 0, y: 0, width: 1600, height: 1000)

@@ -4,7 +4,7 @@ enum Shaders {
     #include <metal_stdlib>
     using namespace metal;
 
-    // Must match `Sprite` in SnowPileCore/Rendering/Sprites.swift.
+    // Must match `Sprite` in SnowsillCore/Rendering/Sprites.swift.
     struct Sprite {
         float2 position;
         float2 size;

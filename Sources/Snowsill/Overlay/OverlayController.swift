@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import IOKit.ps
 import MetalKit
-import SnowPileCore
+import SnowsillCore
 
 /// Owns one overlay (window, view, renderer and simulation) per screen, feeds them the window list, applies
 /// settings, pauses when nobody can see the snow, and lets the mouse grab snow where there is some.
@@ -29,9 +29,9 @@ final class OverlayController {
     private var iconFrames: [CGRect] = []
     private var scan = WindowScan()
     private var scanTimestamp: CFTimeInterval = 0
-    /// Last active app other than SnowPile itself, so opening our menu doesn't change which window carries snow.
+    /// Last active app other than Snowsill itself, so opening our menu doesn't change which window carries snow.
     private var activePID: Int32?
-    private let debug = ProcessInfo.processInfo.environment["SNOWPILE_DEBUG"] == "1"
+    private let debug = ProcessInfo.processInfo.environment["SNOWSILL_DEBUG"] == "1"
 
     // Reasons to stop rendering.
     private var screensAsleep = false
@@ -353,7 +353,7 @@ final class OverlayController {
 
     // MARK: - Self-test
 
-    /// `SNOWPILE_SELFTEST=mouse`: drives the real mouse path (hover → click-through switch, AppKit → CG conversion,
+    /// `SNOWSILL_SELFTEST=mouse`: drives the real mouse path (hover → click-through switch, AppKit → CG conversion,
     /// grab, roll, drop) with simulated positions on the main screen, since synthetic mouse events need
     /// Accessibility permission. Prints one line per check and exits with the number of failures.
     func runMouseSelfTest() {

@@ -1,6 +1,6 @@
-# SnowPile
+# Snowsill
 
-Schnee für den macOS-Desktop. SnowPile ist eine kleine Menüleisten-App, die Schnee über den Bildschirm fallen lässt.
+Schnee für den macOS-Desktop. Snowsill ist eine kleine Menüleisten-App, die Schnee über den Bildschirm fallen lässt.
 Er bleibt auf den Oberkanten der Fenster, auf Widgets, Schreibtisch-Icons und am unteren Bildschirmrand liegen,
 rutscht ab, wenn man ein Fenster schnell zieht, und schmilzt langsam weg.
 
@@ -32,8 +32,8 @@ Privates Spaßprojekt: kein App Store, keine Sandbox, keine Abhängigkeiten von 
 ## Bauen und starten
 
 ```sh
-./scripts/bundle.sh && open SnowPile.app   # App-Bundle bauen und starten
-swift run SnowPile                          # direkt aus dem Quellcode starten
+./scripts/bundle.sh && open Snowsill.app   # App-Bundle bauen und starten
+swift run Snowsill                          # direkt aus dem Quellcode starten
 ```
 
 `bundle.sh` baut eine Release-Version, erzeugt das App-Icon und signiert das Bundle ad hoc. „Beim Anmelden starten“
@@ -62,7 +62,7 @@ Die Einstellungen bleiben über Neustarts erhalten.
 
 ## Berechtigungen
 
-SnowPile liest nur Position und Größe der Fenster, keine Fenstertitel oder Inhalte. Deshalb braucht es **keine**
+Snowsill liest nur Position und Größe der Fenster, keine Fenstertitel oder Inhalte. Deshalb braucht es **keine**
 Bildschirmaufnahme-Berechtigung.
 
 Nur für Schnee auf Schreibtisch-Icons fragt macOS beim Einschalten nach „Bedienungshilfen“, weil die Positionen der
@@ -73,7 +73,7 @@ Icons über die Accessibility-API gelesen werden. Ohne Freigabe bleiben die Icon
 Ziel ist unter 5 % CPU bei mittlerer Intensität. Gezeichnet wird mit Metal in einem einzigen instanzierten Draw-Call.
 Die Bildrate passt sich an: 60 fps, solange ein Fenster bewegt wird oder die Maus über Schnee ist, sonst 30 fps, im
 Akkubetrieb und Stromsparmodus immer 30. Bei Bildschirmsperre, Ruhezustand des Displays und Bildschirmschoner pausiert
-SnowPile.
+Snowsill.
 
 ## Entwicklung
 
@@ -85,10 +85,10 @@ swift test     # Logik-Tests (swift-testing)
 ### Aufbau
 
 ```
-Sources/SnowPile/        App, Overlay-Fenster, Fenster-Polling, Metal-Rendering, Snapshot-Modus
-Sources/SnowPileCore/    reine Logik ohne AppKit/Metal: Simulation, Heightmaps, Verdeckung, Kugeln,
+Sources/Snowsill/        App, Overlay-Fenster, Fenster-Polling, Metal-Rendering, Snapshot-Modus
+Sources/SnowsillCore/    reine Logik ohne AppKit/Metal: Simulation, Heightmaps, Verdeckung, Kugeln,
                          Schaufler, Eiszapfen, Wind, Koordinaten, Instanzdaten fürs Rendering
-Tests/SnowPileTests/     Tests für SnowPileCore
+Tests/SnowsillTests/     Tests für SnowsillCore
 ```
 
 Die Simulation rechnet komplett in CG-Koordinaten (Ursprung oben links) und ist von AppKit und Metal getrennt, deshalb
@@ -101,27 +101,27 @@ Spielt ein Szenario mit simulierten Fenstern auf einer virtuellen Uhr ab (fester
 rendert offscreen und schreibt Bilder und Statistiken nach `snapshots/<szenario>/`:
 
 ```sh
-SNOWPILE_SNAPSHOT=drag swift run SnowPile
+SNOWSILL_SNAPSHOT=drag swift run Snowsill
 ```
 
 Szenarien: `drag`, `close`, `ground`, `overlap`, `plow`, `snowman`, `carry`, `icicles`, `secondary`, `widgets`,
 `wind`, `icons`. Ausgabe: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt)
-und `stats.txt`. Mit `SNOWPILE_SNAPSHOT_OUT=<ordner>` lässt sich der Zielordner ändern.
+und `stats.txt`. Mit `SNOWSILL_SNAPSHOT_OUT=<ordner>` lässt sich der Zielordner ändern.
 
 ### Weitere Umgebungsvariablen
 
 | Variable                     | Zweck                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------ |
-| `SNOWPILE_DEBUG=1`           | Oberflächen als rote Linien, FPS und Flockenzahl einblenden               |
-| `SNOWPILE_SELFTEST=mouse`    | Mauspfad live prüfen (Hover, Klick-Durchlass, Schneemann bauen)           |
-| `SNOWPILE_LOGIN_ITEM=status` | Login-Objekt prüfen oder setzen (`status`, `on`, `off`), nur im Bundle    |
-| `SNOWPILE_ICONS=list`        | erkannte Schreibtisch-Icons ausgeben                                      |
+| `SNOWSILL_DEBUG=1`           | Oberflächen als rote Linien, FPS und Flockenzahl einblenden               |
+| `SNOWSILL_SELFTEST=mouse`    | Mauspfad live prüfen (Hover, Klick-Durchlass, Schneemann bauen)           |
+| `SNOWSILL_LOGIN_ITEM=status` | Login-Objekt prüfen oder setzen (`status`, `on`, `off`), nur im Bundle    |
+| `SNOWSILL_ICONS=list`        | erkannte Schreibtisch-Icons ausgeben                                      |
 
 Beispiele:
 
 ```sh
-SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile
-open -W --env SNOWPILE_ICONS=list --stdout /tmp/icons.txt SnowPile.app && cat /tmp/icons.txt
+SNOWSILL_LOGIN_ITEM=status Snowsill.app/Contents/MacOS/Snowsill
+open -W --env SNOWSILL_ICONS=list --stdout /tmp/icons.txt Snowsill.app && cat /tmp/icons.txt
 ```
 
 ## Lizenz

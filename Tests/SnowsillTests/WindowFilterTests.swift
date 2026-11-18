@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 @Suite struct WindowFilterTests {
     func entry(number: Int, pid: Int32, layer: Int = 0, alpha: Double = 1,

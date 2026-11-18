@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 @Suite struct SurfaceTests {
     func makeSurface(width: CGFloat = 20, edges: Surface.Edges = .walls, maxHeight: CGFloat = 50) -> Surface {

@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 import ServiceManagement
-import SnowPileCore
+import SnowsillCore
 
 /// User settings, persisted in `UserDefaults`. Changes are published so the overlay can apply them live.
 @MainActor

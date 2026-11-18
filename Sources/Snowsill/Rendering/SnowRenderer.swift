@@ -1,7 +1,7 @@
 import AppKit
 import MetalKit
 import QuartzCore
-import SnowPileCore
+import SnowsillCore
 
 /// Drives the frame loop of one overlay: steps the simulation, draws the snow surfaces and then all flakes
 /// in one instanced draw call.
@@ -85,7 +85,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             spritePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "spriteVertex", fragment: "spriteFragment")
             surfacePipeline = try Self.makePipeline(device, library, pixelFormat, vertex: "surfaceVertex", fragment: "surfaceFragment")
         } catch {
-            NSLog("SnowPile: Metal pipeline failed: \(error)")
+            NSLog("Snowsill: Metal pipeline failed: \(error)")
             return nil
         }
 

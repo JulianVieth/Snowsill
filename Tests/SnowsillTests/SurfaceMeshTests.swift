@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 @Suite struct SurfaceMeshTests {
     // Screen 0...100 x 0...50 (CG), ground at its bottom edge -> scene-local base y = 0.

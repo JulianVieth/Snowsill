@@ -8,7 +8,7 @@ final class DesktopIconReader: @unchecked Sendable {
     typealias Handler = @MainActor @Sendable (_ frames: [CGRect]) -> Void
 
     private static let interval: TimeInterval = 2
-    private let queue = DispatchQueue(label: "SnowPile.DesktopIconReader", qos: .utility)
+    private let queue = DispatchQueue(label: "Snowsill.DesktopIconReader", qos: .utility)
     // Only touched on `queue`.
     private var timer: DispatchSourceTimer?
     private var last: [CGRect]?

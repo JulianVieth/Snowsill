@@ -1,5 +1,5 @@
 import CoreGraphics
-import SnowPileCore
+import SnowsillCore
 
 /// A scripted sequence of window states for snapshot mode. All rects in CG coordinates (origin top left).
 struct SnapshotScenario {

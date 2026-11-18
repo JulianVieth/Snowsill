@@ -1,8 +1,8 @@
 import AppKit
 import Metal
-import SnowPileCore
+import SnowsillCore
 
-/// Snapshot mode (`SNOWPILE_SNAPSHOT=<scenario>`): runs a scripted scenario with simulated windows on a virtual
+/// Snapshot mode (`SNOWSILL_SNAPSHOT=<scenario>`): runs a scripted scenario with simulated windows on a virtual
 /// clock, renders offscreen and writes PNGs, so changes can be checked without looking at a real screen.
 /// Output: one full frame and one 2× detail crop per capture time, a contact sheet and a stats log.
 @MainActor

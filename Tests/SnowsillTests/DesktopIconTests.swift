@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import SnowPileCore
+@testable import SnowsillCore
 
 @Suite struct DesktopIconTests {
     let screen = CGRect(x: 0, y: 0, width: 1710, height: 1107)

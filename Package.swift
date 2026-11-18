@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "SnowPile",
+    name: "Snowsill",
     platforms: [.macOS(.v14)],
     targets: [
-        .target(name: "SnowPileCore"),
-        .executableTarget(name: "SnowPile", dependencies: ["SnowPileCore"]),
-        .testTarget(name: "SnowPileTests", dependencies: ["SnowPileCore"]),
+        .target(name: "SnowsillCore"),
+        .executableTarget(name: "Snowsill", dependencies: ["SnowsillCore"]),
+        .testTarget(name: "SnowsillTests", dependencies: ["SnowsillCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

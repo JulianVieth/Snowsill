@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import QuartzCore
-import SnowPileCore
+import SnowsillCore
 
 /// Polls the window list on a background queue and hands changed lists to the main actor as immutable snapshots.
 /// Polls at 12 Hz while nothing moves and at 60 Hz right after a change, so snow keeps up with a dragged window.
@@ -16,7 +16,7 @@ final class WindowTracker: @unchecked Sendable {
     private static let activeDuration: CFTimeInterval = 0.5
 
     // All state below is only touched on `queue`.
-    private let queue = DispatchQueue(label: "SnowPile.WindowTracker", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "Snowsill.WindowTracker", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
     private var last: WindowScan?
     /// Notification Center draws the desktop widgets. Looked up now and then, since it can restart.

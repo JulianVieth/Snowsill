@@ -3,11 +3,11 @@ import ServiceManagement
 import SwiftUI
 
 @main
-struct SnowPileApp: App {
+struct SnowsillApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("SnowPile", systemImage: "snowflake") {
+        MenuBarExtra("Snowsill", systemImage: "snowflake") {
             MenuContent(settings: appDelegate.settings) { appDelegate.shakeOff() }
         }
     }
@@ -62,7 +62,7 @@ struct MenuContent: View {
             Text(error)
         }
         Divider()
-        Button("SnowPile beenden") { NSApp.terminate(nil) }
+        Button("Snowsill beenden") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 }
@@ -74,30 +74,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let env = ProcessInfo.processInfo.environment
-        if let scenario = env["SNOWPILE_SNAPSHOT"] {
-            let out = env["SNOWPILE_SNAPSHOT_OUT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
-            exit(SnapshotRunner.run(scenarioName: scenario, outputDirectory: out, debug: env["SNOWPILE_DEBUG"] == "1"))
+        if let scenario = env["SNOWSILL_SNAPSHOT"] {
+            let out = env["SNOWSILL_SNAPSHOT_OUT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            exit(SnapshotRunner.run(scenarioName: scenario, outputDirectory: out, debug: env["SNOWSILL_DEBUG"] == "1"))
         }
-        if env["SNOWPILE_ICONS"] == "list" {
+        if env["SNOWSILL_ICONS"] == "list" {
             print("Bedienungshilfen: \(DesktopIconReader.isTrusted ? "erlaubt" : "nicht erlaubt")")
             for frame in DesktopIconReader.readIconFrames() { print("Icon \(frame)") }
             exit(0)
         }
-        if let action = env["SNOWPILE_LOGIN_ITEM"] {
+        if let action = env["SNOWSILL_LOGIN_ITEM"] {
             exit(LoginItemCheck.run(action))
         }
         // Two instances would snow twice and block each other's clicks (each sees the other's overlay as a floating
         // window). Happens when the bundle runs and `swift run` starts another one.
         let own = ProcessInfo.processInfo.processIdentifier
         if let other = NSWorkspace.shared.runningApplications.first(where: {
-            $0.processIdentifier != own && ($0.bundleIdentifier == "local.snowpile.SnowPile" || $0.localizedName == "SnowPile")
+            $0.processIdentifier != own && ($0.bundleIdentifier == "local.snowsill.Snowsill" || $0.localizedName == "Snowsill")
         }) {
-            print("SnowPile läuft bereits (PID \(other.processIdentifier)). Diese Instanz beendet sich.")
+            print("Snowsill läuft bereits (PID \(other.processIdentifier)). Diese Instanz beendet sich.")
             exit(0)
         }
         NSApp.setActivationPolicy(.accessory)
         overlay.start()
-        if env["SNOWPILE_SELFTEST"] == "mouse" { overlay.runMouseSelfTest() }
+        if env["SNOWSILL_SELFTEST"] == "mouse" { overlay.runMouseSelfTest() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Hidden check for the login item, since it only works from the bundle: `SNOWPILE_LOGIN_ITEM=status|on|off`.
+/// Hidden check for the login item, since it only works from the bundle: `SNOWSILL_LOGIN_ITEM=status|on|off`.
 enum LoginItemCheck {
     static func run(_ action: String) -> Int32 {
         let service = SMAppService.mainApp
