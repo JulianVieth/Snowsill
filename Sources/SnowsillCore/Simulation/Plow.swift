@@ -22,6 +22,12 @@ public struct Plow: Sendable {
     public static let wallLength: CGFloat = 60
     /// Pause before it comes back from the other side after something built stopped it.
     public static let returnDelay: Double = 3
+    /// Once the ground is this full (share of its maximum height), the plow comes after a short pause instead
+    /// of the regular interval: in a blizzard the ground fills in about a minute.
+    public static let fullGround: CGFloat = 0.8
+    public static let fullGroundPause: Double = 30
+    /// Distance it keeps from anything built, room for the wall in front of the blade.
+    static let stopMargin: CGFloat = 6 + wallLength
 
     public internal(set) var phase: Phase = .idle
     /// Front edge of the blade (CG x).
@@ -67,9 +73,11 @@ extension SnowSimulation {
                 plow.isReturnTrip = true
                 plow.direction = back
             } else {
-                guard time - plow.lastRun >= config.plowInterval,
-                      surfaces[g].meanHeight >= config.plowThreshold
-                else { return }
+                let height = reachableMeanHeight(ground: g)
+                let pause = time - plow.lastRun
+                let due = height >= config.plowThreshold && pause >= config.plowInterval
+                let full = height >= surfaces[g].maxHeight * Plow.fullGround && pause >= Plow.fullGroundPause
+                guard due || full else { return }
                 plow.run += 1
                 plow.isReturnTrip = false
                 // Alternate sides so both get cleared.
@@ -84,7 +92,7 @@ extension SnowSimulation {
         if plow.phase == .plowing {
             // Stop in front of anything built, leaving room for the wall so it ends up before it, not under it.
             var blocked = false
-            let margin = 6 + Plow.wallLength
+            let margin = Plow.stopMargin
             for obstacle in groundObstacles() {
                 if plow.direction > 0, obstacle.lowerBound >= plow.x, target > obstacle.lowerBound - margin {
                     target = max(plow.x, obstacle.lowerBound - margin)
@@ -128,6 +136,26 @@ extension SnowSimulation {
             plow.phase = .idle
             plow.lastRun = time
         }
+    }
+
+    /// Mean ground height where the plow can get to: from either screen edge up to the first thing built.
+    /// Snow between two snowmen or in the walls left in front of them never goes away, so it doesn't count.
+    func reachableMeanHeight(ground g: Int) -> CGFloat {
+        let surface = surfaces[g]
+        let obstacles = groundObstacles()
+        guard let first = obstacles.map(\.lowerBound).min(), let last = obstacles.map(\.upperBound).max() else {
+            return surface.meanHeight
+        }
+        let leftEnd = first - Plow.stopMargin, rightStart = last + Plow.stopMargin
+        var sum: CGFloat = 0
+        var count = 0
+        for (c, h) in surface.heights.enumerated() {
+            let x = surface.minX + (CGFloat(c) + 0.5) * Surface.columnWidth
+            guard x < leftEnd || x > rightStart else { continue }
+            sum += h
+            count += 1
+        }
+        return count > 0 ? sum / CGFloat(count) : 0
     }
 
     func groundTop(at x: CGFloat) -> CGFloat? {

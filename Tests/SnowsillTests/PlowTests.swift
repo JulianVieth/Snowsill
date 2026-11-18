@@ -160,6 +160,40 @@ import Testing
         #expect(height(s, from: 700 + 140, to: 980) < 4)
     }
 
+    // MARK: - Heavy snowfall
+
+    @Test func comesEarlyWhenTheGroundIsNearlyFull() {
+        var s = sim(groundHeight: 45, interval: 240)
+        run(&s, seconds: Plow.fullGroundPause - 1)
+        #expect(!s.plow.isActive)
+        run(&s, seconds: 2)
+        #expect(s.plow.isActive)
+    }
+
+    @Test func keepsTheRegularIntervalWhileThereIsRoom() {
+        var s = sim(groundHeight: 30, interval: 240)
+        run(&s, seconds: 120)
+        #expect(!s.plow.isActive)
+        #expect(s.plow.lastRun == 0)
+    }
+
+    /// Blizzard with large flakes fills the ground in about a minute; the plow has to keep up.
+    @Test func keepsUpWithABlizzard() {
+        var c = SnowConfig()
+        c.maxFlakes = 2200
+        c.spawnRate = 120
+        c.radiusRange = 1.8...5.0
+        var s = SnowSimulation(config: c, bounds: CGRect(x: 0, y: 0, width: 1710, height: 1107), seed: 1)
+        var full = 0, samples = 0
+        for i in 0..<(60 * 60 * 5) {
+            s.step(dt: 1.0 / 60)
+            guard i > 60 * 90, i % 60 == 0 else { continue }
+            samples += 1
+            if s.surfaces[0].meanHeight > 0.95 * s.surfaces[0].maxHeight { full += 1 }
+        }
+        #expect(Double(full) / Double(samples) < 0.25)
+    }
+
     @Test func disabledPlowNeverComes() {
         var c = config()
         c.plowEnabled = false
