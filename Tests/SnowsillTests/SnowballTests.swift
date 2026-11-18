@@ -351,8 +351,7 @@ import Testing
     }
 
     // MARK: - Plow
-
-    @Test func plowStopsRightInFrontOfABallAndLeavesNoBlock() throws {
+    @Test func plowLeavesABallWhole() throws {
         var c = config()
         c.plowEnabled = true
         c.plowInterval = 8
@@ -361,28 +360,11 @@ import Testing
         s.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 20_000, minX: 0, maxX: 1000) }
         makeBall(&s, at: 50, distance: 200, dropAt: 600, dropY: 500)
         let stack = try #require(s.stacks.first)
-        let r = try #require(stack.radii.first)
-        var closest: CGFloat = .infinity, closestBack: CGFloat = .infinity
-        for _ in 0..<(60 * 32) {
-            s.step(dt: 1.0 / 60)
-            guard s.plow.phase == .plowing else { continue }
-            if s.plow.isReturnTrip {
-                closestBack = min(closestBack, s.plow.x - (stack.x + r))
-            } else {
-                closest = min(closest, stack.x - r - s.plow.x)
-            }
-        }
-        // Stops close to the ball from both sides (leaving room for its short wall), never touching it.
-        for gap in [closest, closestBack] {
-            #expect(gap >= 0)
-            #expect(gap < Plow.wallLength + 20)
-        }
-        let after = try #require(s.stacks.first)
-        #expect(abs(after.bottomY - stack.bottomY) < 4)
+        run(&s, seconds: 30)
         #expect(!s.plow.isActive)
-        // A short pile on each side of the ball, no long block.
-        let heights = s.surfaces[0].heights
-        #expect(heights.max()! <= 20 + Plow.wallRise + 0.5)
-        #expect(heights.filter { $0 > 20 + 3 }.count < 2 * (Int(Plow.wallLength / Surface.columnWidth) + 5))
+        let after = try #require(s.stacks.first)
+        #expect(after.volumes == stack.volumes)
+        #expect(after.x == stack.x)
+        #expect(after.bottomY > stack.bottomY + 10)
     }
 }

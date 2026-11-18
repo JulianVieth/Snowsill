@@ -118,18 +118,25 @@ public enum SceneSprites {
     static func writePlow(_ simulation: SnowSimulation, into writer: inout SpriteWriter) {
         let plow = simulation.plow
         guard plow.isActive else { return }
-        // Leaving after a stop it backs off, still facing what it stopped at.
-        let d = plow.phase == .leaving ? -plow.direction : plow.direction
+        let d = plow.direction
         let ground = simulation.bounds.maxY - 1.5
         let bx = plow.x
         // Positions along the vehicle, measured backwards from the blade.
         func at(_ back: CGFloat, _ up: CGFloat) -> CGPoint { CGPoint(x: bx - d * back, y: ground - up) }
 
-        let raised: CGFloat = plow.phase == .leaving ? 6 : 0
         // Arm from body to blade.
-        writer.add(.rect, at: at(8, 9 + raised / 2), size: CGSize(width: 6, height: 2), color: steel)
-        // Blade, slightly tilted forward.
-        writer.add(.rect, at: at(2, 9 + raised), size: CGSize(width: 2.6, height: Plow.bladeHeight / 2), color: blade,
+        writer.add(.rect, at: at(8, 9), size: CGSize(width: 6, height: 2), color: steel)
+        // Blade, slightly tilted forward, at least as tall as the snow in front of it.
+        let top = max(plow.bladeTop, Plow.bladeHeight)
+        if top > 30 {
+            // A tall blade needs a brace up to it, or it hangs in the air.
+            let from = at(30, 18), to = at(4, top * 0.7)
+            let length = hypot(to.x - from.x, to.y - from.y)
+            writer.add(.rect, at: CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2),
+                       size: CGSize(width: length / 2, height: 1.2), color: steel,
+                       rotation: atan2(to.y - from.y, to.x - from.x))
+        }
+        writer.add(.rect, at: at(2 + top * 0.06, top / 2), size: CGSize(width: 2.8, height: top / 2), color: blade,
                    rotation: d * 0.12, param: 1.2)
         // Body.
         writer.add(.rect, at: at(36, 12), size: CGSize(width: 24, height: 7), color: orange, param: 3)

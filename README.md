@@ -17,7 +17,7 @@ Privates Spaßprojekt: kein App Store, keine Sandbox, keine Abhängigkeiten von 
   und Hut. Greift man die unterste Kugel, trägt man den ganzen Schneemann, auch auf ein Fenster. Ein Doppelklick lässt
   ihn zerplatzen. Klicks in Fenster gehen dabei immer durch.
 - **Schneeschaufler:** Wird der Bodenschnee zu hoch, fährt ein kleines Räumfahrzeug durch und schiebt einen Wall vor sich
-  her. Vor einem Schneemann hält es an, setzt zurück und räumt dann von der anderen Seite.
+  her. Schneemänner bleiben stehen: Es fährt hinter ihnen durch, räumt den Schnee unter ihnen weg, und sie sinken auf den Boden.
 - **Eiszapfen:** Liegt länger Schnee auf einem Fenster, wachsen an seiner Unterkante Eiszapfen. Bei schnellem Bewegen
   brechen sie ab.
 - **Wind und Wetter:** Ruhige Brise mit Böen, ab und zu ein kurzes Schneegestöber. Liegender Schnee schmilzt langsam,

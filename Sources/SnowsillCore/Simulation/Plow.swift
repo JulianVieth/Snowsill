@@ -10,24 +10,19 @@ public struct Plow: Sendable {
         case idle
         /// Scraping with the blade down.
         case plowing
-        /// Blade up, backing off after stopping in front of something built.
-        case leaving
     }
 
     public static let length: CGFloat = 78
+    /// Smallest blade; it grows with the snow in front of it, see `bladeTop`.
     public static let bladeHeight: CGFloat = 18
     /// The wall in front of the blade rises at most this much above the untouched snow ahead ...
     public static let wallRise: CGFloat = 16
     /// ... and reaches at most this far ahead of the blade.
     public static let wallLength: CGFloat = 60
-    /// Pause before it comes back from the other side after something built stopped it.
-    public static let returnDelay: Double = 3
     /// Once the ground is this full (share of its maximum height), the plow comes after a short pause instead
     /// of the regular interval: in a blizzard the ground fills in about a minute.
     public static let fullGround: CGFloat = 0.8
     public static let fullGroundPause: Double = 30
-    /// Distance it keeps from anything built, room for the wall in front of the blade.
-    static let stopMargin: CGFloat = 6 + wallLength
 
     public internal(set) var phase: Phase = .idle
     /// Front edge of the blade (CG x).
@@ -38,13 +33,12 @@ public struct Plow: Sendable {
     public internal(set) var lastRun: Double = 0
     /// Snow pushed aside out of view in total (pt²), so the books balance.
     public internal(set) var pushedAside: CGFloat = 0
+    /// Height of the blade above the ground: always a bit more than the snow right in front of it,
+    /// so the wall never looks like it spills over.
+    public internal(set) var bladeTop: CGFloat = Plow.bladeHeight
     /// Time until the next clump tumbles over the wall's crest.
     var tumbleTimer: CGFloat = 0
     var run = 0
-    /// Stopped by something built: comes back from this side right away, so the snow behind it isn't left
-    /// to pile up until the next regular run (it would be full again by then).
-    var returnDirection: CGFloat?
-    var isReturnTrip = false
 
     public init() {}
 
@@ -63,71 +57,37 @@ extension SnowSimulation {
             return
         }
         if plow.phase == .idle {
-            guard config.plowEnabled else {
-                plow.returnDirection = nil
-                return
-            }
-            if let back = plow.returnDirection {
-                guard time - plow.lastRun >= Plow.returnDelay else { return }
-                plow.returnDirection = nil
-                plow.isReturnTrip = true
-                plow.direction = back
-            } else {
-                let height = reachableMeanHeight(ground: g)
-                let pause = time - plow.lastRun
-                let due = height >= config.plowThreshold && pause >= config.plowInterval
-                let full = height >= surfaces[g].maxHeight * Plow.fullGround && pause >= Plow.fullGroundPause
-                guard due || full else { return }
-                plow.run += 1
-                plow.isReturnTrip = false
-                // Alternate sides so both get cleared.
-                plow.direction = plow.run % 2 == 1 ? 1 : -1
-            }
+            let height = surfaces[g].meanHeight
+            let pause = time - plow.lastRun
+            let due = height >= config.plowThreshold && pause >= config.plowInterval
+            let full = height >= surfaces[g].maxHeight * Plow.fullGround && pause >= Plow.fullGroundPause
+            guard config.plowEnabled, due || full else { return }
+            plow.run += 1
+            // Alternate sides so both get cleared.
+            plow.direction = plow.run % 2 == 1 ? 1 : -1
+            plow.bladeTop = max(Plow.bladeHeight, height + 4)
             plow.x = plow.direction > 0 ? bounds.minX - 4 : bounds.maxX + 4
             plow.phase = .plowing
         }
 
-        var target = plow.x + config.plowSpeed * dt * plow.direction
-
-        if plow.phase == .plowing {
-            // Stop in front of anything built, leaving room for the wall so it ends up before it, not under it.
-            var blocked = false
-            let margin = Plow.stopMargin
-            for obstacle in groundObstacles() {
-                if plow.direction > 0, obstacle.lowerBound >= plow.x, target > obstacle.lowerBound - margin {
-                    target = max(plow.x, obstacle.lowerBound - margin)
-                    blocked = true
-                } else if plow.direction < 0, obstacle.upperBound <= plow.x, target < obstacle.upperBound + margin {
-                    target = min(plow.x, obstacle.upperBound + margin)
-                    blocked = true
-                }
-            }
-
-            let scraped = scrape(ground: g, from: plow.x, to: target)
-            plow.x = target
-            // The blade holds back the snow in front of it: a wall between the last scraped and the first wall column.
-            let bladeColumn = Int(((plow.x - surfaces[g].minX) / Surface.columnWidth).rounded(.down))
-            let barrier = plow.direction > 0 ? bladeColumn + 1 : bladeColumn
-            surfaces[g].barrier = (1..<surfaces[g].heights.count).contains(barrier) ? barrier : nil
-            var aside = pushIntoWall(ground: g, volume: scraped)
-            aside -= tumbleOverCrest(ground: g, budget: aside, dt: dt)
-            let nearEdge = plow.direction > 0 ? plow.x >= bounds.maxX - 40 : plow.x <= bounds.minX + 40
-            if nearEdge {
-                throwOffScreen(volume: aside)
-            } else {
-                plow.pushedAside += aside
-            }
-
-            if blocked {
-                surfaces[g].barrier = nil
-                plow.phase = .leaving
-                // Only once per visit, so two obstacles don't make it shuttle back and forth.
-                if !plow.isReturnTrip { plow.returnDirection = -plow.direction }
-                plow.direction = -plow.direction
-            }
+        // It drives behind anything built and scrapes the snow from under it; snowmen drop onto the cleared
+        // ground (`stepStacks`).
+        let target = plow.x + config.plowSpeed * dt * plow.direction
+        let scraped = scrape(ground: g, from: plow.x, to: target)
+        plow.x = target
+        // The blade holds back the snow in front of it: a wall between the last scraped and the first wall column.
+        let bladeColumn = Int(((plow.x - surfaces[g].minX) / Surface.columnWidth).rounded(.down))
+        let barrier = plow.direction > 0 ? bladeColumn + 1 : bladeColumn
+        surfaces[g].barrier = (1..<surfaces[g].heights.count).contains(barrier) ? barrier : nil
+        var aside = pushIntoWall(ground: g, volume: scraped)
+        aside -= tumbleOverCrest(ground: g, budget: aside, dt: dt)
+        let nearEdge = plow.direction > 0 ? plow.x >= bounds.maxX - 40 : plow.x <= bounds.minX + 40
+        if nearEdge {
+            throwOffScreen(volume: aside)
         } else {
-            plow.x = target
+            plow.pushedAside += aside
         }
+        updateBlade(ground: g, dt: dt)
 
         // Done once the whole vehicle has left the screen.
         let rear = plow.x - plow.direction * Plow.length
@@ -138,24 +98,18 @@ extension SnowSimulation {
         }
     }
 
-    /// Mean ground height where the plow can get to: from either screen edge up to the first thing built.
-    /// Snow between two snowmen or in the walls left in front of them never goes away, so it doesn't count.
-    func reachableMeanHeight(ground g: Int) -> CGFloat {
+    /// The blade grows quickly with the snow right in front of it and shrinks slowly, so it doesn't flicker.
+    private mutating func updateBlade(ground g: Int, dt: CGFloat) {
         let surface = surfaces[g]
-        let obstacles = groundObstacles()
-        guard let first = obstacles.map(\.lowerBound).min(), let last = obstacles.map(\.upperBound).max() else {
-            return surface.meanHeight
+        let blade = Int(((plow.x - surface.minX) / Surface.columnWidth).rounded(.down))
+        let step = plow.direction > 0 ? 1 : -1
+        var front: CGFloat = 0
+        for i in 0...6 where surface.heights.indices.contains(blade + step * i) {
+            front = max(front, surface.heights[blade + step * i])
         }
-        let leftEnd = first - Plow.stopMargin, rightStart = last + Plow.stopMargin
-        var sum: CGFloat = 0
-        var count = 0
-        for (c, h) in surface.heights.enumerated() {
-            let x = surface.minX + (CGFloat(c) + 0.5) * Surface.columnWidth
-            guard x < leftEnd || x > rightStart else { continue }
-            sum += h
-            count += 1
-        }
-        return count > 0 ? sum / CGFloat(count) : 0
+        let target = max(Plow.bladeHeight, front + 4)
+        let rate: CGFloat = target > plow.bladeTop ? 20 : 2
+        plow.bladeTop += (target - plow.bladeTop) * min(rate * dt, 1)
     }
 
     func groundTop(at x: CGFloat) -> CGFloat? {
@@ -195,6 +149,8 @@ extension SnowSimulation {
         let beyond = min(max(blade + step * (reach + 3), 0), count - 1)
         let level = surfaces[g].heights[beyond]
         var remaining = volume
+        // Nothing piles up under a snowman, or it would be lifted before it drops.
+        let built = groundObstacles()
         // The column the blade stands in was just scraped; the wall starts next to it.
         var c = blade + step
         var filled = 0
@@ -202,7 +158,8 @@ extension SnowSimulation {
             let t = CGFloat(filled) / CGFloat(reach)
             let cap = min(level + Plow.wallRise * (1 - t * t), surfaces[g].maxHeight)
             let room = (cap - surfaces[g].heights[c]) * Surface.columnWidth
-            if room > 0 {
+            let columnX = surfaces[g].minX + (CGFloat(c) + 0.5) * Surface.columnWidth
+            if room > 0, !built.contains(where: { $0.contains(columnX) }) {
                 let x = surfaces[g].minX + CGFloat(c) * Surface.columnWidth
                 remaining -= surfaces[g].deposit(volume: min(room, remaining), minX: x, maxX: x + Surface.columnWidth)
             }

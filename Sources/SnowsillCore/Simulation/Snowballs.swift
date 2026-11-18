@@ -247,7 +247,16 @@ extension SnowSimulation {
             var remove = false
             switch stack.support {
             case .ground:
-                if let top = groundTop(at: stack.x) { stack.bottomY = top } else { stack.support = .falling(velocity: 0, shatters: true) }
+                if let top = groundTop(at: stack.x) {
+                    // The plow scraped the snow from under it: it drops (and stays whole) instead of jumping down.
+                    if top > stack.bottomY + 2 {
+                        stack.support = .falling(velocity: 0, shatters: false)
+                    } else {
+                        stack.bottomY = top
+                    }
+                } else {
+                    stack.support = .falling(velocity: 0, shatters: true)
+                }
             case .window(let number, let offset):
                 if let left = tracked[number]?.bounds.minX,
                    let s = surfaces.firstIndex(where: { $0.kind == .window(number: number) }),

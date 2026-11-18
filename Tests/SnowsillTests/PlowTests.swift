@@ -124,40 +124,41 @@ import Testing
         return ground.heights[columns].reduce(0, +) / CGFloat(columns.count)
     }
 
-    @Test(arguments: [CGFloat(300), 500, 700])
-    func clearsBothSidesOfASnowmanInOneVisit(snowmanX: CGFloat) {
+    @Test(arguments: [CGFloat(40), 500, 960])
+    func drivesBehindASnowmanAndItDropsOntoTheClearedGround(snowmanX: CGFloat) throws {
         var s = sim(groundHeight: 40, interval: 120)
         placeSnowman(&s, at: snowmanX)
-        // Interval, the blocked trip, backing off, the trip back from the other side.
-        run(&s, seconds: 120 + 30)
+        let before = try #require(s.stacks.first)
+        var highest = before.bottomY
+        // Interval and one crossing of the whole screen.
+        for _ in 0..<(60 * (120 + 14)) {
+            s.step(dt: 1.0 / 60)
+            // No wall builds up under it: it never gets lifted.
+            if let stack = s.stacks.first { highest = min(highest, stack.bottomY) }
+        }
         #expect(!s.plow.isActive)
-        // Clear on both sides, apart from the walls left in front of the snowman.
-        let reach = 70 + Plow.wallLength
-        #expect(height(s, from: 20, to: snowmanX - reach) < 4)
-        #expect(height(s, from: snowmanX + reach, to: 980) < 4)
+        #expect(highest >= before.bottomY - 1)
+        // Intact, on the scraped ground.
+        let after = try #require(s.stacks.first)
         #expect(s.stacks.count == 1)
+        #expect(after.volumes == before.volumes)
+        #expect(after.support == .ground)
+        #expect(after.bottomY > screen.maxY - 4)
+        #expect(height(s, from: 20, to: 980) < 4)
     }
 
-    @Test func snowmanRightAtTheStartIsClearedFromTheOtherSide() {
+    @Test func snowmanFallsRatherThanJumpingDown() throws {
         var s = sim(groundHeight: 40, interval: 120)
-        placeSnowman(&s, at: 40)
-        run(&s, seconds: 120 + 30)
-        #expect(height(s, from: 200, to: 980) < 4)
-    }
-
-    @Test func doesNotShuttleBackAndForthBetweenTwoObstacles() {
-        var s = sim(groundHeight: 40, interval: 120)
-        placeSnowman(&s, at: 300)
-        placeSnowman(&s, at: 700)
-        run(&s, seconds: 120 + 30)
-        #expect(!s.plow.isActive)
-        let lastRun = s.plow.lastRun
-        // Blocked on both trips: it waits for the normal interval before it comes again.
-        run(&s, seconds: 60)
-        #expect(!s.plow.isActive)
-        #expect(s.plow.lastRun == lastRun)
-        #expect(height(s, from: 20, to: 300 - 140) < 4)
-        #expect(height(s, from: 700 + 140, to: 980) < 4)
+        placeSnowman(&s, at: 500)
+        var falling = false
+        for _ in 0..<(60 * (120 + 14)) {
+            s.step(dt: 1.0 / 60)
+            if case .falling(_, let shatters)? = s.stacks.first?.support {
+                falling = true
+                #expect(!shatters)
+            }
+        }
+        #expect(falling)
     }
 
     // MARK: - Heavy snowfall
