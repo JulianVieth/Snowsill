@@ -124,20 +124,6 @@ public enum SceneSprites {
         // Positions along the vehicle, measured backwards from the blade.
         func at(_ back: CGFloat, _ up: CGFloat) -> CGPoint { CGPoint(x: bx - d * back, y: ground - up) }
 
-        // Arm from body to blade.
-        writer.add(.rect, at: at(8, 9), size: CGSize(width: 6, height: 2), color: steel)
-        // Blade, slightly tilted forward, at least as tall as the snow in front of it.
-        let top = max(plow.bladeTop, Plow.bladeHeight)
-        if top > 30 {
-            // A tall blade needs a brace up to it, or it hangs in the air.
-            let from = at(30, 18), to = at(4, top * 0.7)
-            let length = hypot(to.x - from.x, to.y - from.y)
-            writer.add(.rect, at: CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2),
-                       size: CGSize(width: length / 2, height: 1.2), color: steel,
-                       rotation: atan2(to.y - from.y, to.x - from.x))
-        }
-        writer.add(.rect, at: at(2 + top * 0.06, top / 2), size: CGSize(width: 2.8, height: top / 2), color: blade,
-                   rotation: d * 0.12, param: 1.2)
         // Body.
         writer.add(.rect, at: at(36, 12), size: CGSize(width: 24, height: 7), color: orange, param: 3)
         // Black-and-yellow stripe along the body.
@@ -157,5 +143,81 @@ public enum SceneSprites {
             writer.add(.disc, at: at(back, 6), size: CGSize(width: 2.6, height: 2.6), color: hub)
             writer.add(.rect, at: at(back, 6), size: CGSize(width: 4.4, height: 0.7), color: hub, rotation: spin)
         }
+        writeBlade(height: max(plow.bladeTop, Plow.bladeHeight), at: at, into: &writer)
+    }
+
+    static let bladeShadow = SIMD4<Float>(0.80, 0.56, 0.08, 1)
+    static let bladeLight = SIMD4<Float>(1.00, 0.88, 0.36, 1)
+    static let endPlate = SIMD4<Float>(0.86, 0.62, 0.10, 1)
+
+    /// A rounded bar from `a` to `b` (CG points), `thickness` across.
+    static func bar(_ a: CGPoint, _ b: CGPoint, thickness: CGFloat, color: SIMD4<Float>, into writer: inout SpriteWriter) {
+        let length = hypot(b.x - a.x, b.y - a.y)
+        writer.add(.rect, at: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2),
+                   size: CGSize(width: length / 2 + thickness / 2, height: thickness / 2), color: color,
+                   rotation: atan2(b.y - a.y, b.x - a.x), param: thickness / 2)
+    }
+
+    /// The moldboard seen from the side: a curve open to the front, the steel cutting edge at the ground, the top
+    /// rolled forward so the snow tumbles ahead rather than over it. `place(back, up)` places points relative to the
+    /// blade's front edge, where the scraped snow stands as a straight face.
+    static func writeBlade(height: CGFloat, at place: (CGFloat, CGFloat) -> CGPoint, into writer: inout SpriteWriter) {
+        // Arc of a circle whose center lies ahead of the blade, from -55° (foot) to +62° (lip).
+        let low = -55 * CGFloat.pi / 180, high = 62 * CGFloat.pi / 180
+        let radius = height / (sin(high) - sin(low))
+        let centerUp = -radius * sin(low)
+        let centerBack = -radius * cos(low)
+        func profile(_ t: CGFloat) -> (back: CGFloat, up: CGFloat) {
+            let angle = low + (high - low) * t
+            return (centerBack + radius * cos(angle), centerUp + radius * sin(angle))
+        }
+        let segments = 9
+        let raw = (0...segments).map { profile(CGFloat($0) / CGFloat(segments)) }
+        // The hollow touches the snow face, foot and lip reach into the wall: the snow fills the curve.
+        // The face is drawn a little behind the blade's front edge (smoothing), so the hollow sits 3.5 pt back.
+        let shift = (raw.map(\.back).max() ?? 0) - 3.5
+        func at(_ back: CGFloat, _ up: CGFloat) -> CGPoint { place(back - shift, up) }
+        let points = raw
+        let deepest = raw.map(\.back).max() ?? 0
+
+        // Push frame from the body to the back of the blade, and a lift cylinder up to its upper half.
+        bar(place(14, 8), at(deepest + 1, height * 0.3), thickness: 2.2, color: steel, into: &writer)
+        if height > 26 {
+            let mount = place(24, 17), end = at(deepest, height * 0.62)
+            bar(mount, end, thickness: 1.8, color: steel, into: &writer)
+            let sleeve = CGPoint(x: mount.x + (end.x - mount.x) * 0.45, y: mount.y + (end.y - mount.y) * 0.45)
+            bar(mount, sleeve, thickness: 2.8, color: hub, into: &writer)
+        }
+        // Ribs on the back.
+        for t in [CGFloat(0.3), 0.62] {
+            let p = profile(t)
+            bar(at(p.back, p.up), at(p.back + 3, p.up), thickness: 1.4, color: steel, into: &writer)
+        }
+        // End plate: the crescent between the curve and the vertical at its hollow. Hides the straight snow face
+        // where the curve reaches forward.
+        for (p0, p1) in zip(points, points.dropFirst()) {
+            let curve = (p0.back + p1.back) / 2
+            guard deepest - curve > 0.5 else { continue }
+            let up = (p0.up + p1.up) / 2
+            let strip = abs(p1.up - p0.up) / 2 + 0.6
+            let back = deepest + 1.2
+            writer.add(.rect, at: at((back + curve) / 2, up), size: CGSize(width: (back - curve) / 2, height: strip),
+                       color: endPlate)
+        }
+        // Moldboard: a darker back, a lighter face slightly in front of it.
+        let thickness = max(2.6, height * 0.08)
+        for (i, pair) in zip(points, points.dropFirst()).enumerated() {
+            bar(at(pair.0.back + 0.6, pair.0.up), at(pair.1.back + 0.6, pair.1.up),
+                thickness: thickness, color: bladeShadow, into: &writer)
+            let shade = 0.5 + 0.5 * sin(CGFloat(i) / CGFloat(segments - 1) * .pi)
+            let face = bladeLight * Float(shade) + blade * Float(1 - shade)
+            bar(at(pair.0.back - 0.3, pair.0.up), at(pair.1.back - 0.3, pair.1.up),
+                thickness: thickness * 0.55, color: face, into: &writer)
+        }
+        // Rolled lip on top and the steel cutting edge on the ground.
+        if let top = points.last {
+            writer.add(.disc, at: at(top.back - 0.2, top.up), size: CGSize(width: thickness * 0.65, height: 0), color: blade)
+        }
+        bar(at(1.5, 1.2), at(-1.5, 1.2), thickness: 2.2, color: steel, into: &writer)
     }
 }
