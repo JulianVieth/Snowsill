@@ -15,8 +15,8 @@ import Testing
         return config
     }
 
-    func sim(groundHeight: CGFloat, seed: UInt64 = 1) -> SnowSimulation {
-        var sim = SnowSimulation(config: config(), bounds: screen, seed: seed)
+    func sim(groundHeight: CGFloat, seed: UInt64 = 1, interval: Double = 10) -> SnowSimulation {
+        var sim = SnowSimulation(config: config(interval: interval), bounds: screen, seed: seed)
         sim.modifySurface(.ground(screen: 0)) { $0.deposit(volume: 1000 * groundHeight, minX: 0, maxX: 1000) }
         return sim
     }
@@ -108,6 +108,56 @@ import Testing
         run(&s, seconds: 11)
         #expect(s.plow.isActive)
         #expect(s.plow.direction == -1)
+    }
+
+    // MARK: - Something built in the way
+
+    func placeSnowman(_ s: inout SnowSimulation, at x: CGFloat) {
+        let top = s.groundTop(at: x)!
+        s.stacks.append(SnowStack(id: 99, volumes: [2500, 1200, 500], x: x, bottomY: top, support: .ground))
+    }
+
+    /// Mean height of the ground between two x positions.
+    func height(_ s: SnowSimulation, from a: CGFloat, to b: CGFloat) -> CGFloat {
+        let ground = s.surfaces[0]
+        let columns = ground.column(at: a)!...ground.column(at: b)!
+        return ground.heights[columns].reduce(0, +) / CGFloat(columns.count)
+    }
+
+    @Test(arguments: [CGFloat(300), 500, 700])
+    func clearsBothSidesOfASnowmanInOneVisit(snowmanX: CGFloat) {
+        var s = sim(groundHeight: 40, interval: 120)
+        placeSnowman(&s, at: snowmanX)
+        // Interval, the blocked trip, backing off, the trip back from the other side.
+        run(&s, seconds: 120 + 30)
+        #expect(!s.plow.isActive)
+        // Clear on both sides, apart from the walls left in front of the snowman.
+        let reach = 70 + Plow.wallLength
+        #expect(height(s, from: 20, to: snowmanX - reach) < 4)
+        #expect(height(s, from: snowmanX + reach, to: 980) < 4)
+        #expect(s.stacks.count == 1)
+    }
+
+    @Test func snowmanRightAtTheStartIsClearedFromTheOtherSide() {
+        var s = sim(groundHeight: 40, interval: 120)
+        placeSnowman(&s, at: 40)
+        run(&s, seconds: 120 + 30)
+        #expect(height(s, from: 200, to: 980) < 4)
+    }
+
+    @Test func doesNotShuttleBackAndForthBetweenTwoObstacles() {
+        var s = sim(groundHeight: 40, interval: 120)
+        placeSnowman(&s, at: 300)
+        placeSnowman(&s, at: 700)
+        run(&s, seconds: 120 + 30)
+        #expect(!s.plow.isActive)
+        let lastRun = s.plow.lastRun
+        // Blocked on both trips: it waits for the normal interval before it comes again.
+        run(&s, seconds: 60)
+        #expect(!s.plow.isActive)
+        #expect(s.plow.lastRun == lastRun)
+        #expect(height(s, from: 20, to: 300 - 140) < 4)
+        #expect(height(s, from: 700 + 140, to: 980) < 4)
     }
 
     @Test func disabledPlowNeverComes() {

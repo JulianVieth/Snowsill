@@ -97,7 +97,8 @@ struct SnapshotScenario {
     }()
 
     /// Rolls three balls out of deep ground snow and stacks them into a snowman, builds a second one on a window,
-    /// then closes that window, and finally the plow comes and stops in front of the first snowman.
+    /// then closes that window, and finally the plow comes, stops in front of the first snowman and comes back
+    /// from the other side to clear the rest.
     static let snowman: SnapshotScenario = {
         var config = SnowConfig()
         config.plowInterval = 30
@@ -114,9 +115,9 @@ struct SnapshotScenario {
         ]
         return SnapshotScenario(
             name: "snowman",
-            summary: "Kugeln rollen, zwei Schneemänner bauen (Boden und Fenster), Fenster bei 27 s schließen, ab 30 s Schaufler",
-            duration: 42,
-            captures: [3, 5, 9.5, 13.5, 17, 25, 27.3, 28, 31, 34, 36, 42],
+            summary: "Kugeln rollen, zwei Schneemänner bauen (Boden und Fenster), Fenster bei 27 s schließen, ab 30 s Schaufler, danach Rückfahrt von rechts",
+            duration: 56,
+            captures: [3, 5, 9.5, 13.5, 17, 25, 27.3, 28, 31, 34, 36, 42, 46, 50, 56],
             windows: { t in t < 27 ? [WindowInfo(number: 5, ownerPID: pid, bounds: window)] : [] },
             focus: { t, _ in t < 29 ? CGRect(x: 300, y: 180, width: 1000, height: 720) : CGRect(x: 0, y: 500, width: 1440, height: 400) },
             config: config,

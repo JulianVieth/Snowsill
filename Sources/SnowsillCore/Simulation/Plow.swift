@@ -20,6 +20,8 @@ public struct Plow: Sendable {
     public static let wallRise: CGFloat = 16
     /// ... and reaches at most this far ahead of the blade.
     public static let wallLength: CGFloat = 60
+    /// Pause before it comes back from the other side after something built stopped it.
+    public static let returnDelay: Double = 3
 
     public internal(set) var phase: Phase = .idle
     /// Front edge of the blade (CG x).
@@ -33,6 +35,10 @@ public struct Plow: Sendable {
     /// Time until the next clump tumbles over the wall's crest.
     var tumbleTimer: CGFloat = 0
     var run = 0
+    /// Stopped by something built: comes back from this side right away, so the snow behind it isn't left
+    /// to pile up until the next regular run (it would be full again by then).
+    var returnDirection: CGFloat?
+    var isReturnTrip = false
 
     public init() {}
 
@@ -51,13 +57,24 @@ extension SnowSimulation {
             return
         }
         if plow.phase == .idle {
-            guard config.plowEnabled,
-                  time - plow.lastRun >= config.plowInterval,
-                  surfaces[g].meanHeight >= config.plowThreshold
-            else { return }
-            plow.run += 1
-            // Alternate sides so both get cleared.
-            plow.direction = plow.run % 2 == 1 ? 1 : -1
+            guard config.plowEnabled else {
+                plow.returnDirection = nil
+                return
+            }
+            if let back = plow.returnDirection {
+                guard time - plow.lastRun >= Plow.returnDelay else { return }
+                plow.returnDirection = nil
+                plow.isReturnTrip = true
+                plow.direction = back
+            } else {
+                guard time - plow.lastRun >= config.plowInterval,
+                      surfaces[g].meanHeight >= config.plowThreshold
+                else { return }
+                plow.run += 1
+                plow.isReturnTrip = false
+                // Alternate sides so both get cleared.
+                plow.direction = plow.run % 2 == 1 ? 1 : -1
+            }
             plow.x = plow.direction > 0 ? bounds.minX - 4 : bounds.maxX + 4
             plow.phase = .plowing
         }
@@ -96,6 +113,8 @@ extension SnowSimulation {
             if blocked {
                 surfaces[g].barrier = nil
                 plow.phase = .leaving
+                // Only once per visit, so two obstacles don't make it shuttle back and forth.
+                if !plow.isReturnTrip { plow.returnDirection = -plow.direction }
                 plow.direction = -plow.direction
             }
         } else {
