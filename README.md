@@ -1,13 +1,129 @@
 # SnowPile
 
-Schnee für den macOS-Desktop: Flocken fallen über den Bildschirm, bleiben auf Fenstern, Widgets und am Boden liegen,
-rutschen beim Ziehen ab und schmelzen langsam. Aus Bodenschnee lassen sich Kugeln rollen und Schneemänner bauen,
-ein kleiner Schaufler räumt ab und zu den Boden, unter verschneiten Fenstern wachsen Eiszapfen.
+Schnee für den macOS-Desktop. SnowPile ist eine kleine Menüleisten-App, die Schnee über den Bildschirm fallen lässt.
+Er bleibt auf den Oberkanten der Fenster, auf Widgets, Schreibtisch-Icons und am unteren Bildschirmrand liegen,
+rutscht ab, wenn man ein Fenster schnell zieht, und schmilzt langsam weg.
+
+Privates Spaßprojekt: kein App Store, keine Sandbox, keine Abhängigkeiten von Drittanbietern.
+
+## Was es kann
+
+- **Schnee auf Fenstern:** Jedes sichtbare Fenster bekommt eine bucklige Schneekappe. Verdeckte Teile einer Oberkante
+  bleiben frei. Verschiebt man ein Fenster, wandert der Schnee mit. Bei schnellem Ziehen, beim Verkleinern, Schließen
+  oder Minimieren fällt er als Klumpen und Pulver herunter.
+- **Schneeverwehung am Boden:** Am unteren Bildschirmrand wächst eine Schneeschicht mit ausgefranster Oberkante.
+- **Schneekugeln und Schneemänner:** Über genug Schnee wird der Cursor zur Hand. Ziehen rollt eine Kugel, die mit dem
+  aufgesammelten Schnee wächst. Drei gestapelte Kugeln ergeben einen Schneemann mit Augen, Karottennase, Knöpfen, Armen
+  und Hut. Greift man die unterste Kugel, trägt man den ganzen Schneemann, auch auf ein Fenster. Ein Doppelklick lässt
+  ihn zerplatzen. Klicks in Fenster gehen dabei immer durch.
+- **Schneeschaufler:** Wird der Bodenschnee zu hoch, fährt ein kleines Räumfahrzeug durch und schiebt einen Wall vor sich
+  her. Um Schneemänner fährt es nicht herum, es hält vorher an und setzt zurück.
+- **Eiszapfen:** Liegt länger Schnee auf einem Fenster, wachsen an seiner Unterkante Eiszapfen. Bei schnellem Bewegen
+  brechen sie ab.
+- **Wind und Wetter:** Ruhige Brise mit Böen, ab und zu ein kurzes Schneegestöber. Liegender Schnee schmilzt langsam,
+  schneller, wenn lange nichts nachkommt.
+- **Mehrere Bildschirme:** Jeder angeschlossene Bildschirm bekommt sein eigenes Schneetreiben.
+
+## Voraussetzungen
+
+- macOS 14 oder neuer, Apple Silicon
+- Swift 6 Toolchain (Xcode oder die Command Line Tools reichen)
+
+## Bauen und starten
 
 ```sh
-./scripts/bundle.sh && open SnowPile.app   # App bauen und starten (nötig für „Beim Anmelden starten“)
-swift run SnowPile                          # direkt starten
-swift test                                  # Logik-Tests
+./scripts/bundle.sh && open SnowPile.app   # App-Bundle bauen und starten
+swift run SnowPile                          # direkt aus dem Quellcode starten
 ```
 
-Bedienung über das Schneeflocken-Symbol in der Menüleiste. macOS 14+, Apple Silicon.
+`bundle.sh` baut eine Release-Version, erzeugt das App-Icon und signiert das Bundle ad hoc. „Beim Anmelden starten“
+funktioniert nur aus dem Bundle. Es läuft immer nur eine Instanz.
+
+## Bedienung
+
+Alles läuft über das Schneeflocken-Symbol in der Menüleiste:
+
+| Einstellung                     | Wirkung                                                         |
+| ------------------------------- | --------------------------------------------------------------- |
+| Schnee                          | An/Aus                                                          |
+| Intensität                      | leicht, mittel, Schneesturm                                     |
+| Flockengröße, Wind              | Größe der Flocken und Stärke des Windes                         |
+| Schnee liegt auf                | allen Fenstern oder nur dem aktiven                             |
+| Schnee am Boden                 | Verwehung am unteren Bildschirmrand                             |
+| Schneeschaufler                 | Räumfahrzeug am Boden                                           |
+| Schneemänner bauen              | Kugeln rollen und stapeln                                       |
+| Eiszapfen                       | Eiszapfen an Fensterunterkanten                                 |
+| Schnee auf Widgets              | Schnee auf den Widgets des Schreibtischs                        |
+| Schnee auf Schreibtisch-Icons   | braucht die Berechtigung „Bedienungshilfen“ (siehe unten)       |
+| Schnee abschütteln              | entfernt allen liegenden Schnee, Kugeln und Eiszapfen           |
+| Beim Anmelden starten           | Launch at Login (nur im `.app`-Bundle)                          |
+
+Die Einstellungen bleiben über Neustarts erhalten.
+
+## Berechtigungen
+
+SnowPile liest nur Position und Größe der Fenster, keine Fenstertitel oder Inhalte. Deshalb braucht es **keine**
+Bildschirmaufnahme-Berechtigung.
+
+Nur für Schnee auf Schreibtisch-Icons fragt macOS beim Einschalten nach „Bedienungshilfen“, weil die Positionen der
+Icons über die Accessibility-API gelesen werden. Ohne Freigabe bleiben die Icons einfach schneefrei.
+
+## Performance
+
+Ziel ist unter 5 % CPU bei mittlerer Intensität. Gezeichnet wird mit Metal in einem einzigen instanzierten Draw-Call.
+Die Bildrate passt sich an: 60 fps, solange ein Fenster bewegt wird oder die Maus über Schnee ist, sonst 30 fps, im
+Akkubetrieb und Stromsparmodus immer 30. Bei Bildschirmsperre, Ruhezustand des Displays und Bildschirmschoner pausiert
+SnowPile.
+
+## Entwicklung
+
+```sh
+swift build    # bauen
+swift test     # Logik-Tests (swift-testing)
+```
+
+### Aufbau
+
+```
+Sources/SnowPile/        App, Overlay-Fenster, Fenster-Polling, Metal-Rendering, Snapshot-Modus
+Sources/SnowPileCore/    reine Logik ohne AppKit/Metal: Simulation, Heightmaps, Verdeckung, Kugeln,
+                         Schaufler, Eiszapfen, Wind, Koordinaten, Instanzdaten fürs Rendering
+Tests/SnowPileTests/     Tests für SnowPileCore
+```
+
+Die Simulation rechnet komplett in CG-Koordinaten (Ursprung oben links) und ist von AppKit und Metal getrennt, deshalb
+lässt sie sich ohne Bildschirm testen. Mehr Details zu Architektur und Designentscheidungen stehen in
+[`CLAUDE.md`](CLAUDE.md).
+
+### Snapshot-Modus
+
+Spielt ein Szenario mit simulierten Fenstern auf einer virtuellen Uhr ab (fester Seed, schneller als Echtzeit),
+rendert offscreen und schreibt Bilder und Statistiken nach `snapshots/<szenario>/`:
+
+```sh
+SNOWPILE_SNAPSHOT=drag swift run SnowPile
+```
+
+Szenarien: `drag`, `close`, `ground`, `overlap`, `plow`, `snowman`, `carry`, `icicles`, `secondary`, `widgets`,
+`wind`, `icons`. Ausgabe: `sheet.png` (Übersicht), `tNNN.NN.png` (ganzer Bildschirm), `detail_*.png` (2×-Ausschnitt)
+und `stats.txt`. Mit `SNOWPILE_SNAPSHOT_OUT=<ordner>` lässt sich der Zielordner ändern.
+
+### Weitere Umgebungsvariablen
+
+| Variable                     | Zweck                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `SNOWPILE_DEBUG=1`           | Oberflächen als rote Linien, FPS und Flockenzahl einblenden               |
+| `SNOWPILE_SELFTEST=mouse`    | Mauspfad live prüfen (Hover, Klick-Durchlass, Schneemann bauen)           |
+| `SNOWPILE_LOGIN_ITEM=status` | Login-Objekt prüfen oder setzen (`status`, `on`, `off`), nur im Bundle    |
+| `SNOWPILE_ICONS=list`        | erkannte Schreibtisch-Icons ausgeben                                      |
+
+Beispiele:
+
+```sh
+SNOWPILE_LOGIN_ITEM=status SnowPile.app/Contents/MacOS/SnowPile
+open -W --env SNOWPILE_ICONS=list --stdout /tmp/icons.txt SnowPile.app && cat /tmp/icons.txt
+```
+
+## Lizenz
+
+MIT, siehe [`LICENSE`](LICENSE).
