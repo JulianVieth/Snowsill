@@ -42,6 +42,7 @@ struct MenuContent: View {
             .disabled(!settings.groundEnabled)
         Toggle("Eiszapfen", isOn: $settings.iciclesEnabled)
         Toggle("Schnee auf Widgets", isOn: $settings.widgetsEnabled)
+        Toggle("Schnee im Vollbildmodus", isOn: $settings.snowInFullScreen)
         Toggle("Schnee auf Schreibtisch-Icons", isOn: Binding(
             get: { settings.iconsEnabled },
             set: { on in

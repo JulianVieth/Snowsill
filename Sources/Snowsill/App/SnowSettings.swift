@@ -54,6 +54,7 @@ final class SnowSettings: ObservableObject {
     @Published var snowmenEnabled: Bool { didSet { defaults.set(snowmenEnabled, forKey: "snowmenEnabled") } }
     @Published var iciclesEnabled: Bool { didSet { defaults.set(iciclesEnabled, forKey: "iciclesEnabled") } }
     @Published var widgetsEnabled: Bool { didSet { defaults.set(widgetsEnabled, forKey: "widgetsEnabled") } }
+    @Published var snowInFullScreen: Bool { didSet { defaults.set(snowInFullScreen, forKey: "snowInFullScreen") } }
     /// Needs the Accessibility permission, so it is off until switched on.
     @Published var iconsEnabled: Bool { didSet { defaults.set(iconsEnabled, forKey: "iconsEnabled") } }
     /// Last error from registering the login item, shown in the menu.
@@ -73,6 +74,7 @@ final class SnowSettings: ObservableObject {
         iciclesEnabled = bool("iciclesEnabled", true)
         widgetsEnabled = bool("widgetsEnabled", true)
         iconsEnabled = bool("iconsEnabled", false)
+        snowInFullScreen = bool("snowInFullScreen", true)
     }
 
     /// The simulation parameters these settings stand for.

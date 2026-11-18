@@ -54,7 +54,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = false`, standardmäßig `ignoresMouseEvents = true`
 - Interaktion (Schneekugeln, siehe unten): Die Mausposition wird gepollt. Nur wenn der Cursor über greifbarem Schnee am Boden, einer Kugel oder einem Schneemann steht, wird `ignoresMouseEvents = false` gesetzt und der Cursor zur offenen Hand. Sonst gehen alle Klicks durch. Klicks auf Fenster dürfen nie abgefangen werden.
 - `level = .floating` (3): über normalen Fenstern, unter Menüleiste (24), Menüs, Alerts (8), Spotlight und Mitteilungen. Nicht `.statusBar` (25), das liegt über Menüleiste und Alerts. Das Dock (20) liegt über dem Schnee.
-- `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`
+- `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`. Ist „Schnee im Vollbildmodus“ aus, fehlt `.fullScreenAuxiliary`: Dann hält macOS das Overlay selbst von Vollbild-Spaces fern (keine Heuristik über Fenstergrößen, die würde maximierte Fenster bei ausgeblendeter Menüleiste verwechseln). Ein Overlay, das so nicht auf dem aktiven Space liegt (`isOnActiveSpace`), pausiert und nimmt keine Maus an; geprüft bei `activeSpaceDidChangeNotification`.
 - `MTKView` mit `layer.isOpaque = false`, `clearColor` mit Alpha 0, Blending mit vormultipliziertem Alpha. Shader werden zur Laufzeit mit `makeLibrary(source:)` kompiliert, weil die Command Line Tools keinen Offline-Metal-Compiler haben.
 - Bei `NSApplication.didChangeScreenParametersNotification` die Overlays neu aufbauen
 
@@ -98,7 +98,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 ### Schneeschaufler
 - Ein kleines Räumfahrzeug fährt regelmäßig am Bildschirmboden von einer Seite zur anderen, damit die Bodenschicht nicht zu einem gleichmäßigen Block wird. Es kommt, wenn die mittlere Bodenhöhe einen Schwellwert überschreitet, frühestens alle paar Minuten.
 - Vor der Schaufel sammelt sich Schnee als Wall, dahinter bleibt eine dünne, unregelmäßige Restschicht. Der Wall ist Teil der Boden-Heightmap direkt vor der Schaufel: ein Wulst bis 16 pt über dem unberührten Schnee davor, der über 60 pt in ihn ausläuft (eine Masse, auch in tiefem Schnee sichtbar); über die Krone kippen immer wieder kleine Klumpen nach vorn, schneller als der Schaufler, damit sie nicht hinter ihm landen (nicht in der Nähe von Gebautem); die Schaufel ist eine Wand für die Sandpile-Regel und für die Glättung beim Zeichnen, damit nichts nach hinten verschmiert. Was nicht in den Wall passt, schiebt er zur Seite aus dem Bild (`Plow.pushedAside`), wie ein echter Räumer an den Straßenrand; am Bildschirmrand fliegt es als Klumpen hinaus. Bewusste Abweichung von der Volumenerhaltung (2026-11-17, nach Julians Abnahme: ein voll erhaltener Wall wurde zum Block und zu einer zweiten Masse).
-- Kugeln und Schneemänner am Boden umfährt bzw. überspringt es nicht: Es hält mit Platz für den Wall davor an und setzt zurück (keine Zerstörung von Gebautem).
+- Kugeln und Schneemänner am Boden umfährt bzw. überspringt es nicht: Es hält mit Platz für den Wall davor an und setzt zurück (keine Zerstörung von Gebautem). Danach kommt es nach 3 s von der anderen Seite zurück und räumt dort bis zum Hindernis, sonst wäre die Seite dahinter bis zur nächsten regulären Fahrt längst wieder voll. Die Rückfahrt gibt es nur einmal pro Besuch (kein Pendeln zwischen zwei Hindernissen).
 - Das Dock liegt über dem Overlay, der Schaufler ist also hinter dem Dock teilweise verdeckt. Das ist in Ordnung.
 
 ### Schnee auf Schreibtisch-Icons und Widgets
@@ -114,7 +114,7 @@ Simulation (reines Swift, kein AppKit/Metal-Import) und Rendering bleiben strikt
 - Rendering: alle aktiven Partikel und Szenenobjekte werden pro Frame in einen vorallokierten `MTLBuffer` gepackt (`FlakeSprites.pack`, `SceneSprites.write`, getestet) und mit einem einzigen instanzierten Draw-Call gezeichnet. Die Scheibe entsteht prozedural im Fragment-Shader. Nicht SpriteKit: 800 `SKSpriteNode`s kosteten allein durch die Property-Setter ca. 10 % CPU.
 
 ### Menüleiste und Einstellungen
-- `MenuBarExtra` mit Schneeflocken-SF-Symbol. Optionen: An/Aus, Intensität (leicht / mittel / Schneesturm), Flockengröße, Wind, Modus „nur aktives Fenster“ oder „alle Fenster“, Schnee am Boden an/aus, Schaufler, Schneemänner, Eiszapfen, Widgets, Schreibtisch-Icons, „Schnee abschütteln“ (Reset), Launch at Login, Beenden
+- `MenuBarExtra` mit Schneeflocken-SF-Symbol. Optionen: An/Aus, Intensität (leicht / mittel / Schneesturm), Flockengröße, Wind, Modus „nur aktives Fenster“ oder „alle Fenster“, Schnee am Boden an/aus, Schaufler, Schneemänner, Eiszapfen, Widgets, Schreibtisch-Icons, Schnee im Vollbildmodus, „Schnee abschütteln“ (Reset), Launch at Login, Beenden
 - Persistenz über `@AppStorage` / `UserDefaults`
 - Launch at Login über `SMAppService.mainApp` (funktioniert nur im `.app`-Bundle)
 

@@ -17,7 +17,7 @@ Privates Spaßprojekt: kein App Store, keine Sandbox, keine Abhängigkeiten von 
   und Hut. Greift man die unterste Kugel, trägt man den ganzen Schneemann, auch auf ein Fenster. Ein Doppelklick lässt
   ihn zerplatzen. Klicks in Fenster gehen dabei immer durch.
 - **Schneeschaufler:** Wird der Bodenschnee zu hoch, fährt ein kleines Räumfahrzeug durch und schiebt einen Wall vor sich
-  her. Um Schneemänner fährt es nicht herum, es hält vorher an und setzt zurück.
+  her. Vor einem Schneemann hält es an, setzt zurück und räumt dann von der anderen Seite.
 - **Eiszapfen:** Liegt länger Schnee auf einem Fenster, wachsen an seiner Unterkante Eiszapfen. Bei schnellem Bewegen
   brechen sie ab.
 - **Wind und Wetter:** Ruhige Brise mit Böen, ab und zu ein kurzes Schneegestöber. Liegender Schnee schmilzt langsam,
@@ -54,6 +54,7 @@ Alles läuft über das Schneeflocken-Symbol in der Menüleiste:
 | Schneemänner bauen              | Kugeln rollen und stapeln                                       |
 | Eiszapfen                       | Eiszapfen an Fensterunterkanten                                 |
 | Schnee auf Widgets              | Schnee auf den Widgets des Schreibtischs                        |
+| Schnee im Vollbildmodus         | aus: kein Schnee über Apps im Vollbildmodus                     |
 | Schnee auf Schreibtisch-Icons   | braucht die Berechtigung „Bedienungshilfen“ (siehe unten)       |
 | Schnee abschütteln              | entfernt allen liegenden Schnee, Kugeln und Eiszapfen           |
 | Beim Anmelden starten           | Launch at Login (nur im `.app`-Bundle)                          |
