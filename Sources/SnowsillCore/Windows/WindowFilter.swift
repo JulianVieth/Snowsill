@@ -67,40 +67,46 @@ public enum WindowFilter {
 
     // MARK: - Full screen
 
-    /// Screens that look like they show an app in full screen: an app window covers the whole screen and there is
-    /// no menu bar on it. A zoomed window leaves the menu bar; a full-screen space hides it.
-    /// The overlay can't tell by itself: an agent app's panels show on full-screen spaces even without
-    /// `.fullScreenAuxiliary`.
-    public static func fullScreenCandidates(_ list: [[String: Any]], screens: [CGRect], ownPID: Int32) -> [CGRect] {
-        screens.filter { screen in
-            var covered = false, menuBar = false
-            for entry in list {
-                guard let layer = entry[kCGWindowLayer as String] as? Int,
-                      let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid != ownPID,
-                      let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
-                      let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
-                else { continue }
-                if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0 { continue }
-                if layer == 0, matches(bounds, screen) { covered = true }
-                if layer == mainMenuLayer, bounds.intersects(CGRect(x: screen.minX, y: screen.minY, width: screen.width, height: 2)) {
-                    menuBar = true
-                }
+    /// Screens that show an app in full screen. The overlay can't tell by itself: an agent app's panels show on
+    /// full-screen spaces even without `.fullScreenAuxiliary`. Needs a list that includes desktop elements.
+    ///
+    /// A full-screen space shows no desktop: the Finder's desktop window (one per screen) is missing there, and an
+    /// app window covers the screen. With a notch it sits below the menu bar strip, exactly like a maximized
+    /// window, so only the missing desktop tells them apart. Without any desktop window (desktop icons switched
+    /// off) only a window over the whole screen with no menu bar counts.
+    public static func fullScreens(_ list: [[String: Any]], screens: [CGRect], ownPID: Int32) -> [CGRect] {
+        var appWindows: [CGRect] = [], desktops: [CGRect] = [], menuBars: [CGRect] = []
+        for entry in list {
+            guard let layer = entry[kCGWindowLayer as String] as? Int,
+                  let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid != ownPID,
+                  let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
+            else { continue }
+            if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0 { continue }
+            switch layer {
+            case 0: appWindows.append(bounds)
+            case desktopIconLayer: desktops.append(bounds)
+            case mainMenuLayer: menuBars.append(bounds)
+            default: break
             }
-            return covered && !menuBar
+        }
+        return screens.filter { screen in
+            if desktops.isEmpty {
+                let menuBar = menuBars.contains { $0.intersects(CGRect(x: screen.minX, y: screen.minY, width: screen.width, height: 2)) }
+                return !menuBar && appWindows.contains { matches($0, screen) }
+            }
+            let hasDesktop = desktops.contains { d in
+                let overlap = d.intersection(screen)
+                return !overlap.isNull && overlap.width * overlap.height > screen.width * screen.height / 2
+            }
+            return !hasDesktop && appWindows.contains { covers($0, screen) }
         }
     }
 
-    /// Confirms a candidate with a list that includes desktop elements: a full-screen space shows no desktop.
-    /// Rules out a window filling a screen whose menu bar and Dock hide automatically.
-    public static func isFullScreen(_ screen: CGRect, desktopList: [[String: Any]]) -> Bool {
-        !desktopList.contains { entry in
-            guard let layer = entry[kCGWindowLayer as String] as? Int, layer == desktopIconLayer,
-                  let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
-            else { return false }
-            let overlap = bounds.intersection(screen)
-            return !overlap.isNull && overlap.width * overlap.height > screen.width * screen.height / 2
-        }
+    /// Full width down to the bottom, from the top or from just below a menu bar strip (notch).
+    private static func covers(_ window: CGRect, _ screen: CGRect) -> Bool {
+        abs(window.minX - screen.minX) <= 1 && abs(window.maxX - screen.maxX) <= 1
+            && abs(window.maxY - screen.maxY) <= 1 && window.minY <= screen.minY + 50
     }
 
     private static func matches(_ a: CGRect, _ b: CGRect) -> Bool {

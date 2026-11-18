@@ -94,49 +94,73 @@ import Testing
         #expect(scan.windows.map(\.number) == [4])
     }
 
-    // MARK: - Full screen (measured on the Sidecar display, 2026-11-18)
+    // MARK: - Full screen (measured on a notch laptop and a Sidecar display, 2026-11-18)
 
     let sidecar = CGRect(x: -1366, y: 0, width: 1366, height: 1024)
     let laptop = CGRect(x: 0, y: 0, width: 1710, height: 1107)
     let menuLayer = Int(CGWindowLevelForKey(.mainMenuWindow))
     let desktopLayer = Int(CGWindowLevelForKey(.desktopIconWindow))
 
-    @Test func appInFullScreenCoversTheScreenWithoutMenuBar() {
-        let list = [
-            entry(number: 1, pid: 10, bounds: CGRect(x: -1366, y: 0, width: 1366, height: 68)),
-            entry(number: 2, pid: 10, bounds: sidecar),
-            entry(number: 3, pid: 20, layer: menuLayer, bounds: CGRect(x: 0, y: 0, width: 1710, height: 33)),
-        ]
-        #expect(WindowFilter.fullScreenCandidates(list, screens: [laptop, sidecar], ownPID: 99) == [sidecar])
+    func desktop(_ screen: CGRect) -> [String: Any] { entry(number: 900, pid: 30, layer: desktopLayer, bounds: screen) }
+    func menuBar(_ screen: CGRect, height: CGFloat) -> [String: Any] {
+        entry(number: 901, pid: 20, layer: menuLayer, bounds: CGRect(x: screen.minX, y: 0, width: screen.width, height: height))
     }
 
-    @Test func zoomedWindowLeavesTheMenuBar() {
+    @Test func fullScreenOnTheSidecarCoversItAndHidesItsDesktop() {
         let list = [
-            entry(number: 3, pid: 20, layer: menuLayer, bounds: CGRect(x: -1366, y: 0, width: 1366, height: 30)),
-            entry(number: 1, pid: 10, bounds: CGRect(x: -1366, y: 30, width: 1366, height: 994)),
-        ]
-        #expect(WindowFilter.fullScreenCandidates(list, screens: [sidecar], ownPID: 99).isEmpty)
-    }
-
-    @Test func screenSizedWindowWithMenuBarIsNoFullScreen() {
-        let list = [
-            entry(number: 3, pid: 20, layer: menuLayer, bounds: CGRect(x: -1366, y: 0, width: 1366, height: 30)),
+            menuBar(laptop, height: 34),
             entry(number: 1, pid: 10, bounds: sidecar),
+            desktop(laptop),
         ]
-        #expect(WindowFilter.fullScreenCandidates(list, screens: [sidecar], ownPID: 99).isEmpty)
+        #expect(WindowFilter.fullScreens(list, screens: [laptop, sidecar], ownPID: 99) == [sidecar])
+    }
+
+    /// With a notch the app sits below the menu bar strip, just like a maximized window; only the desktop tells.
+    @Test func fullScreenBelowTheNotch() {
+        let list = [
+            menuBar(laptop, height: 34),
+            menuBar(sidecar, height: 30),
+            entry(number: 1, pid: 10, bounds: CGRect(x: 0, y: 34, width: 1710, height: 1073)),
+            desktop(sidecar),
+        ]
+        #expect(WindowFilter.fullScreens(list, screens: [laptop, sidecar], ownPID: 99) == [laptop])
+    }
+
+    @Test func maximizedWindowsKeepTheDesktop() {
+        let list = [
+            menuBar(laptop, height: 34),
+            menuBar(sidecar, height: 30),
+            entry(number: 1, pid: 10, bounds: CGRect(x: 0, y: 34, width: 1710, height: 1073)),
+            entry(number: 2, pid: 11, bounds: sidecar),
+            desktop(laptop),
+            desktop(sidecar),
+        ]
+        #expect(WindowFilter.fullScreens(list, screens: [laptop, sidecar], ownPID: 99).isEmpty)
+    }
+
+    @Test func smallerWindowIsNoFullScreen() {
+        let list = [menuBar(sidecar, height: 30), entry(number: 1, pid: 10, bounds: CGRect(x: -1366, y: 30, width: 1366, height: 914))]
+        #expect(WindowFilter.fullScreens(list + [desktop(laptop)], screens: [laptop, sidecar], ownPID: 99).isEmpty)
     }
 
     @Test func ownOverlayDoesNotCount() {
-        let list = [entry(number: 1, pid: 99, bounds: sidecar)]
-        #expect(WindowFilter.fullScreenCandidates(list, screens: [sidecar], ownPID: 99).isEmpty)
+        let list = [entry(number: 1, pid: 99, bounds: sidecar), desktop(laptop)]
+        #expect(WindowFilter.fullScreens(list, screens: [laptop, sidecar], ownPID: 99).isEmpty)
     }
 
-    /// Auto-hidden menu bar and Dock with a window filling the screen: the desktop is still there.
-    @Test func desktopWindowRulesOutFullScreen() {
-        let desktop = [entry(number: 5, pid: 30, layer: desktopLayer, bounds: sidecar)]
-        #expect(!WindowFilter.isFullScreen(sidecar, desktopList: desktop))
-        #expect(WindowFilter.isFullScreen(sidecar, desktopList: []))
-        let elsewhere = [entry(number: 5, pid: 30, layer: desktopLayer, bounds: laptop)]
-        #expect(WindowFilter.isFullScreen(sidecar, desktopList: elsewhere))
+    /// Desktop icons switched off (no desktop window anywhere): only a window over the whole screen without menu bar.
+    @Test func withoutDesktopWindowsOnlyTheStrictRule() {
+        let maximized = [menuBar(sidecar, height: 30), entry(number: 1, pid: 10, bounds: CGRect(x: -1366, y: 30, width: 1366, height: 994))]
+        #expect(WindowFilter.fullScreens(maximized, screens: [sidecar], ownPID: 99).isEmpty)
+        let full = [entry(number: 1, pid: 10, bounds: sidecar)]
+        #expect(WindowFilter.fullScreens(full, screens: [sidecar], ownPID: 99) == [sidecar])
+        let screenSizedWithMenu = [menuBar(sidecar, height: 30), entry(number: 1, pid: 10, bounds: sidecar)]
+        #expect(WindowFilter.fullScreens(screenSizedWithMenu, screens: [sidecar], ownPID: 99).isEmpty)
+    }
+
+    @Test func desktopWindowsAreNotParsedAsWindowsOrBlockers() {
+        let scan = WindowFilter.scan([desktop(laptop), entry(number: 2, pid: 10)], ownPID: 99, widgetPID: nil)
+        #expect(scan.windows.map(\.number) == [2])
+        #expect(scan.blockers.isEmpty)
     }
 }

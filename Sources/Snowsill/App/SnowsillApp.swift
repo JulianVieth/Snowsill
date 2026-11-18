@@ -93,8 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let other = NSWorkspace.shared.runningApplications.first(where: {
             $0.processIdentifier != own && ($0.bundleIdentifier == "local.snowsill.Snowsill" || $0.localizedName == "Snowsill")
         }) {
-            print("Snowsill läuft bereits (PID \(other.processIdentifier)). Diese Instanz beendet sich.")
-            exit(0)
+            // On a restart the old one may still be quitting; without waiting both would end up gone.
+            let deadline = Date().addingTimeInterval(3)
+            while !other.isTerminated, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+            if !other.isTerminated {
+                print("Snowsill läuft bereits (PID \(other.processIdentifier)). Diese Instanz beendet sich.")
+                exit(0)
+            }
         }
         NSApp.setActivationPolicy(.accessory)
         overlay.start()

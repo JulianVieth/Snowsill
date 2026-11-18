@@ -63,7 +63,8 @@ final class WindowTracker: @unchecked Sendable {
 
     private func poll(_ onChange: @escaping Handler) {
         let now = CACurrentMediaTime()
-        guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        // With desktop elements: their absence on a screen is what gives away a full-screen app.
+        guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
             as? [[String: Any]] else { return }
         if now - widgetLookup > 5 {
             widgetLookup = now
@@ -71,12 +72,7 @@ final class WindowTracker: @unchecked Sendable {
                 .first?.processIdentifier
         }
         var scan = WindowFilter.scan(raw, ownPID: ownPID, widgetPID: widgetPID)
-        let candidates = WindowFilter.fullScreenCandidates(raw, screens: Self.screenFrames(), ownPID: ownPID)
-        if !candidates.isEmpty,
-           let desktop = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] {
-            // Only in this rare case: the list above leaves out the desktop windows needed to confirm.
-            scan.fullScreens = candidates.filter { WindowFilter.isFullScreen($0, desktopList: desktop) }
-        }
+        scan.fullScreens = WindowFilter.fullScreens(raw, screens: Self.screenFrames(), ownPID: ownPID)
 
         let changed = scan != last
         if changed || isFast {
