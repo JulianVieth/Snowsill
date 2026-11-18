@@ -4,7 +4,7 @@ import MetalKit
 /// Borderless, transparent, click-through panel over a whole screen. A non-activating panel, so grabbing snow
 /// never takes the focus away from the app the user works in.
 final class OverlayWindow: NSPanel {
-    init(screen: NSScreen, showsInFullScreen: Bool) {
+    init(screen: NSScreen) {
         super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         setFrame(screen.frame, display: false)
         isOpaque = false
@@ -17,16 +17,9 @@ final class OverlayWindow: NSPanel {
         becomesKeyOnlyIfNeeded = true
         // Menus, alerts, Spotlight and the menu bar all sit above .floating; normal windows (0) stay below.
         level = .floating
-        setShowsInFullScreen(showsInFullScreen)
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         isReleasedWhenClosed = false
         animationBehavior = .none
-    }
-
-    /// Without `.fullScreenAuxiliary` macOS keeps the panel off full-screen spaces by itself.
-    func setShowsInFullScreen(_ shows: Bool) {
-        var behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        if shows { behavior.insert(.fullScreenAuxiliary) }
-        if collectionBehavior != behavior { collectionBehavior = behavior }
     }
 
     override var canBecomeKey: Bool { false }

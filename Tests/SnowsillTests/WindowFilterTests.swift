@@ -93,4 +93,50 @@ import Testing
         #expect(scan.blockers == [CGRect(x: 0, y: 0, width: 300, height: 200)])
         #expect(scan.windows.map(\.number) == [4])
     }
+
+    // MARK: - Full screen (measured on the Sidecar display, 2026-11-18)
+
+    let sidecar = CGRect(x: -1366, y: 0, width: 1366, height: 1024)
+    let laptop = CGRect(x: 0, y: 0, width: 1710, height: 1107)
+    let menuLayer = Int(CGWindowLevelForKey(.mainMenuWindow))
+    let desktopLayer = Int(CGWindowLevelForKey(.desktopIconWindow))
+
+    @Test func appInFullScreenCoversTheScreenWithoutMenuBar() {
+        let list = [
+            entry(number: 1, pid: 10, bounds: CGRect(x: -1366, y: 0, width: 1366, height: 68)),
+            entry(number: 2, pid: 10, bounds: sidecar),
+            entry(number: 3, pid: 20, layer: menuLayer, bounds: CGRect(x: 0, y: 0, width: 1710, height: 33)),
+        ]
+        #expect(WindowFilter.fullScreenCandidates(list, screens: [laptop, sidecar], ownPID: 99) == [sidecar])
+    }
+
+    @Test func zoomedWindowLeavesTheMenuBar() {
+        let list = [
+            entry(number: 3, pid: 20, layer: menuLayer, bounds: CGRect(x: -1366, y: 0, width: 1366, height: 30)),
+            entry(number: 1, pid: 10, bounds: CGRect(x: -1366, y: 30, width: 1366, height: 994)),
+        ]
+        #expect(WindowFilter.fullScreenCandidates(list, screens: [sidecar], ownPID: 99).isEmpty)
+    }
+
+    @Test func screenSizedWindowWithMenuBarIsNoFullScreen() {
+        let list = [
+            entry(number: 3, pid: 20, layer: menuLayer, bounds: CGRect(x: -1366, y: 0, width: 1366, height: 30)),
+            entry(number: 1, pid: 10, bounds: sidecar),
+        ]
+        #expect(WindowFilter.fullScreenCandidates(list, screens: [sidecar], ownPID: 99).isEmpty)
+    }
+
+    @Test func ownOverlayDoesNotCount() {
+        let list = [entry(number: 1, pid: 99, bounds: sidecar)]
+        #expect(WindowFilter.fullScreenCandidates(list, screens: [sidecar], ownPID: 99).isEmpty)
+    }
+
+    /// Auto-hidden menu bar and Dock with a window filling the screen: the desktop is still there.
+    @Test func desktopWindowRulesOutFullScreen() {
+        let desktop = [entry(number: 5, pid: 30, layer: desktopLayer, bounds: sidecar)]
+        #expect(!WindowFilter.isFullScreen(sidecar, desktopList: desktop))
+        #expect(WindowFilter.isFullScreen(sidecar, desktopList: []))
+        let elsewhere = [entry(number: 5, pid: 30, layer: desktopLayer, bounds: laptop)]
+        #expect(WindowFilter.isFullScreen(sidecar, desktopList: elsewhere))
+    }
 }

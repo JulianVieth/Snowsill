@@ -64,8 +64,6 @@ final class OverlayController {
                 self?.applyWindows()
             }
         })
-        // A screen switching to or from a full-screen space.
-        observePause(workspace, NSWorkspace.activeSpaceDidChangeNotification) { _ in }
         observePause(workspace, NSWorkspace.screensDidSleepNotification) { $0.screensAsleep = true }
         observePause(workspace, NSWorkspace.screensDidWakeNotification) { $0.screensAsleep = false }
         observePause(workspace, NSWorkspace.sessionDidResignActiveNotification) { $0.sessionInactive = true }
@@ -166,9 +164,9 @@ final class OverlayController {
         }
     }
 
-    /// Not on the space the screen shows, i.e. kept off a full-screen space ("Schnee im Vollbildmodus" off).
-    private func isOffSpace(_ overlay: Overlay) -> Bool {
-        overlay.window.isVisible && !overlay.window.isOnActiveSpace
+    /// The screen shows an app in full screen and "Schnee im Vollbildmodus" is off.
+    private func isHiddenForFullScreen(_ overlay: Overlay) -> Bool {
+        !settings.snowInFullScreen && scan.fullScreens.contains(overlay.renderer.screenFrameCG)
     }
 
     /// Paused (and hidden when switched off) while nobody can see the snow.
@@ -176,15 +174,19 @@ final class OverlayController {
         let run = shouldRun
         updateFrameRate()
         for overlay in overlays {
-            overlay.window.setShowsInFullScreen(settings.snowInFullScreen)
             if run {
-                if !overlay.window.isVisible { overlay.window.orderFrontRegardless() }
-                // Frozen while hidden on a full-screen space, so it doesn't snow on unseen.
-                let hidden = isOffSpace(overlay)
+                // Hidden and frozen over a full-screen app, so it doesn't snow on unseen.
+                let hidden = isHiddenForFullScreen(overlay)
                 if debug && hidden != overlay.view.isPaused {
-                    print("Overlay \(overlay.displayID): \(hidden ? "nicht auf dem aktiven Space, pausiert" : "sichtbar, läuft")")
+                    print("Overlay \(overlay.displayID): \(hidden ? "Vollbild, ausgeblendet" : "läuft")")
+                    fflush(stdout)
                 }
-                if overlay.view.isPaused && !hidden { overlay.renderer.resumeClock() }
+                if hidden {
+                    overlay.window.orderOut(nil)
+                } else {
+                    if overlay.view.isPaused { overlay.renderer.resumeClock() }
+                    if !overlay.window.isVisible { overlay.window.orderFrontRegardless() }
+                }
                 overlay.view.isPaused = hidden
             } else {
                 overlay.view.isPaused = true
@@ -215,11 +217,13 @@ final class OverlayController {
     private func startTracker() {
         tracker.start { [weak self] scan, timestamp in
             guard let self else { return }
+            let previousFullScreens = self.scan.fullScreens
             if scan != self.scan { self.lastWindowActivity = CACurrentMediaTime() }
             self.scan = scan
             self.scanTimestamp = timestamp
             self.applyWindows()
             self.updateFrameRate()
+            if scan.fullScreens != previousFullScreens { self.updateRunning() }
         }
     }
 
@@ -329,7 +333,7 @@ final class OverlayController {
                 kept.append(old.remove(at: i))
                 continue
             }
-            let window = OverlayWindow(screen: screen, showsInFullScreen: settings.snowInFullScreen)
+            let window = OverlayWindow(screen: screen)
             let view = OverlayView(frame: NSRect(origin: .zero, size: screen.frame.size), device: device)
             view.colorPixelFormat = .bgra8Unorm
             view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)

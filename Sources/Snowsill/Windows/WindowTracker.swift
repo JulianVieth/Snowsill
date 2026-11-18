@@ -52,6 +52,15 @@ final class WindowTracker: @unchecked Sendable {
         timer?.schedule(deadline: startNow ? .now() : .now() + interval, repeating: interval, leeway: .milliseconds(2))
     }
 
+    /// Screen frames in CG coordinates, safe off the main thread (unlike `NSScreen`).
+    private static func screenFrames() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.prefix(Int(count)).map { CGDisplayBounds($0) }
+    }
+
     private func poll(_ onChange: @escaping Handler) {
         let now = CACurrentMediaTime()
         guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
@@ -61,7 +70,13 @@ final class WindowTracker: @unchecked Sendable {
             widgetPID = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.notificationcenterui")
                 .first?.processIdentifier
         }
-        let scan = WindowFilter.scan(raw, ownPID: ownPID, widgetPID: widgetPID)
+        var scan = WindowFilter.scan(raw, ownPID: ownPID, widgetPID: widgetPID)
+        let candidates = WindowFilter.fullScreenCandidates(raw, screens: Self.screenFrames(), ownPID: ownPID)
+        if !candidates.isEmpty,
+           let desktop = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] {
+            // Only in this rare case: the list above leaves out the desktop windows needed to confirm.
+            scan.fullScreens = candidates.filter { WindowFilter.isFullScreen($0, desktopList: desktop) }
+        }
 
         let changed = scan != last
         if changed || isFast {
