@@ -17,12 +17,15 @@ Privates Spaßprojekt: kein App Store, keine Sandbox, keine Abhängigkeiten von 
   und Hut. Greift man die unterste Kugel, trägt man den ganzen Schneemann, auch auf ein Fenster. Ein Doppelklick lässt
   ihn zerplatzen. Klicks in Fenster gehen dabei immer durch.
 - **Schneeschaufler:** Wird der Bodenschnee zu hoch, fährt ein kleines Räumfahrzeug durch und schiebt einen Wall vor sich
-  her. Schneemänner bleiben stehen: Es fährt hinter ihnen durch, räumt den Schnee unter ihnen weg, und sie sinken auf den Boden.
+  her. Ist der Boden fast voll, etwa im Schneesturm, kommt es schon nach einer halben Minute wieder. Schneemänner
+  bleiben stehen: Es fährt hinter ihnen durch, räumt den Schnee unter ihnen weg, und sie sinken auf den Boden.
 - **Eiszapfen:** Liegt länger Schnee auf einem Fenster, wachsen an seiner Unterkante Eiszapfen. Bei schnellem Bewegen
   brechen sie ab.
 - **Wind und Wetter:** Ruhige Brise mit Böen, ab und zu ein kurzes Schneegestöber. Liegender Schnee schmilzt langsam,
   schneller, wenn lange nichts nachkommt.
 - **Mehrere Bildschirme:** Jeder angeschlossene Bildschirm bekommt sein eigenes Schneetreiben.
+- **Vollbildmodus:** Auf Wunsch fällt über Apps im Vollbildmodus kein Schnee, und zwar nur auf dem Bildschirm, auf dem
+  die App im Vollbild läuft.
 
 ## Voraussetzungen
 
@@ -39,6 +42,10 @@ swift run Snowsill                          # direkt aus dem Quellcode starten
 `bundle.sh` baut eine Release-Version, erzeugt das App-Icon und signiert das Bundle ad hoc. „Beim Anmelden starten“
 funktioniert nur aus dem Bundle. Es läuft immer nur eine Instanz.
 
+Das Bundle ist nur ad hoc signiert, nicht notarisiert. Auf dem Mac, auf dem es gebaut wurde, startet es normal. Kopiert
+man `Snowsill.app` auf einen anderen Mac, blockiert Gatekeeper den ersten Start. Dann in den Systemeinstellungen unter
+„Datenschutz & Sicherheit“ auf „Trotzdem öffnen“ klicken, oder die App dort einfach selbst bauen.
+
 ## Bedienung
 
 Alles läuft über das Schneeflocken-Symbol in der Menüleiste:
@@ -47,7 +54,8 @@ Alles läuft über das Schneeflocken-Symbol in der Menüleiste:
 | ------------------------------- | --------------------------------------------------------------- |
 | Schnee                          | An/Aus                                                          |
 | Intensität                      | leicht, mittel, Schneesturm                                     |
-| Flockengröße, Wind              | Größe der Flocken und Stärke des Windes                         |
+| Flockengröße                    | klein, normal, groß                                             |
+| Wind                            | windstill, Brise, stürmisch                                     |
 | Schnee liegt auf                | allen Fenstern oder nur dem aktiven                             |
 | Schnee am Boden                 | Verwehung am unteren Bildschirmrand                             |
 | Schneeschaufler                 | Räumfahrzeug am Boden                                           |
@@ -58,6 +66,7 @@ Alles läuft über das Schneeflocken-Symbol in der Menüleiste:
 | Schnee auf Schreibtisch-Icons   | braucht die Berechtigung „Bedienungshilfen“ (siehe unten)       |
 | Schnee abschütteln              | entfernt allen liegenden Schnee, Kugeln und Eiszapfen           |
 | Beim Anmelden starten           | Launch at Login (nur im `.app`-Bundle)                          |
+| Snowsill beenden                | beendet die App (⌘Q)                                            |
 
 Die Einstellungen bleiben über Neustarts erhalten.
 
